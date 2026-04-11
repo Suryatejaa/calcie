@@ -1,0 +1,16 @@
+# Calcie - Personal AI Assistant
+# Phase 5: Tools
+
+speechrecognition  # Phase 2: Voice input
+pyttsx3            # Phase 3: Voice output (offline TTS)
+edge-tts           # Phase 3: High-quality neural TTS
+ddgs               # Phase 5: Web search (DuckDuckGo)
+python-dotenv      # Environment variables from .env file
+anthropic          # Claude API
+google-generativeai # Google Gemini API
+openai             # OpenAI API
+# Grok API uses requests (no special SDK needed)
+tavily-python      # Tavily SDK (research + polling)
+exa-py             # Exa SDK (fast search + contents)
+pyautogui          # Desktop automation backend for computer-control skill
+pillow             # Image handling and pyautogui screenshot support

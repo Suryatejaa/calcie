@@ -1,0 +1,21 @@
+# Environment variables (secrets)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Database & memory files
+calcie_history.db
+calcie_facts.json
+.calcie/
+
+# Temporary files
+*.tmp
+*.mp3
+
+# IDE
+.vscode/
+.idea/

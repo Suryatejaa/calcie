@@ -1,0 +1,122 @@
+{
+  "project": {
+    "name": "Calcie",
+    "description": "Personal AI assistant with voice input/output, local LLM (Ollama), and memory system",
+    "original_name": "Jarvis",
+    "owner": "Surya"
+  },
+  "sessions": [
+    {
+      "date": "2026-04-05",
+      "initial_state": {
+        "action": "User pulled mistral model via Ollama",
+        "phase_1_status": "Complete - Core loop in jarvis.py with Ollama integration",
+        "dependencies": "None (stdlib only)"
+      },
+      "actions": [
+        {
+          "phase": 2,
+          "name": "Voice Input",
+          "changes": {
+            "requirements.txt": ["Added speechrecognition package"],
+            "code_changes": [
+              "Added speech_recognition import with graceful fallback",
+              "Added listen_voice() method using sr.Microphone()",
+              "Google Speech-to-Text for transcription (free tier)",
+              "5s listen timeout, 10s phrase limit",
+              "Ambient noise adjustment",
+              "Error handling for unknown audio, request errors, timeout, mic issues",
+              "Updated print_banner() to show voice status",
+              "Modified main loop: voice first, text fallback"
+            ]
+          }
+        }
+      ],
+      "next_steps": [
+        "Phase 3: Voice output (TTS) - pyttsx3 or edge-tts",
+        "Phase 4: Memory system - SQLite database",
+        "Phase 5: Tools - Web search + app launcher"
+      ]
+    },
+    {
+      "date": "2026-04-06",
+      "updates": [
+        "Renamed project from Jarvis to Calcie",
+        "File renamed: jarvis.py -> calcie.py",
+        "SYSTEM_PROMPT changed to CALCIE persona (warm, friendly companion, concise responses)",
+        "Phase 3 Complete: Added voice output with pyttsx3"
+      ],
+      "phase_3_changes": {
+        "requirements.txt": ["Added pyttsx3"],
+        "code_changes": [
+          "Added speak() method to Calcie class",
+          "TTS engine: rate=180, volume=0.9",
+          "All responses spoken after printing",
+          "Graceful fallback if pyttsx3 unavailable"
+        ]
+      },
+      "latency_optimizations": {
+        "listen_timeout": "5s -> 3s",
+        "phrase_limit": "10s -> 8s",
+        "ambient_noise_adjustment": "0.3s -> 0.2s",
+        "added": "TTS toggle command (tts)",
+        "removed": "Thinking... indicator",
+        "note": "Main latency is Ollama + Mistral inference (hardware/model dependent)"
+      }
+    },
+    {
+      "date": "2026-04-06_later",
+      "updates": [
+        "Phase 4 Complete: Migrated history to SQLite db and permanent facts to JSON.",
+        "Rewrote Wake Word logic to use true background daemon thread to prevent dropping audio frames.",
+        "Added 'Enter to wake' manual override via stdin queue threading.",
+        "Strict hallucination filters placed on SYSTEM_PROMPT to combat faux memories.",
+        "Emoji regex filter added before TTS to prevent vocalizing icons (e.g. 'flexed biceps').",
+        "Configured LLM settings to run with external models (user currently testing gemma4)."
+      ]
+    }
+  ],
+  "known_issues": [
+    "Voice input requires working microphone",
+    "Voice input requires PyAudio (macOS: brew install portaudio)",
+    "Google STT has free tier limits",
+    "Ollama assumes a running model on localhost:11434"
+  ],
+  "commands": {
+    "fix_pyaudio_macos": "brew install portaudio && pip install speechrecognition pyaudio",
+    "run": "python3 calcie.py",
+    "in_app": {
+      "Enter": "Instantly start voice recording without wake word",
+      "clear": "Reset memory",
+      "exit": "Quit"
+    }
+  },
+  "phases": {
+    "1": { "name": "Core Loop", "status": "complete" },
+    "2": { "name": "Voice Input", "status": "complete" },
+    "3": { "name": "Voice Output", "status": "complete" },
+    "4": { "name": "Memory (SQLite / Extraction)", "status": "complete" },
+    "5": { "name": "Tools (Web Search + App Launcher)", "status": "complete" }
+  },
+  "wake_word_detection": {
+    "enabled": true,
+    "wake_words": ["calcie", "kelsey", "samantha", "pinky", "cal", "radhika", "chelsea", "calc"],
+    "description": "True background threading listener that never drops audio frames.",
+    "implementation": "listen_in_background daemon coupled with threading Queue checks for max responsiveness.",
+    "fallback": "Push Enter on an empty line to instantly activate."
+  },
+  "tools": {
+    "web_search": {
+      "status": "complete",
+      "provider": "DuckDuckGo (ddgs package)",
+      "trigger": "[SEARCH: query]",
+      "description": "Searches web for current events, news, facts"
+    },
+    "app_launcher": {
+      "status": "complete",
+      "platform": "macOS (open -a), Linux support",
+      "trigger": "[OPEN_APP: app_name]",
+      "supported_apps": ["chrome", "safari", "firefox", "terminal", "finder", "notes", "calendar", "mail", "music", "spotify", "vscode", "slack", "discord"]
+    }
+  }
+}
