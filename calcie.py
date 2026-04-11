@@ -56,6 +56,7 @@ from calcie_core.search_utils import (
     truncate_text as core_truncate_text,
 )
 from calcie_core.code_tools import ReadOnlyCodeTools
+from calcie_core.sync_client import CalcieSyncClient
 from calcie_core.skills import (
     AgenticComputerUseSkill,
     AppAccessSkill,
@@ -383,6 +384,27 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
         # Determine which LLM to use (priority chain)
         self.active_llm = self._select_active_llm()
 
+        # V1 cloud sync (mobile/laptop interoperability)
+        self.sync_enabled = self._env_bool("CALCIE_SYNC_ENABLED", False)
+        self.sync_base_url = (os.environ.get("CALCIE_SYNC_BASE_URL") or "").strip().rstrip("/")
+        self.sync_user_id = (os.environ.get("CALCIE_SYNC_USER_ID") or "default-user").strip()
+        inferred_device = "mobile" if "android" in self.model.lower() else "laptop"
+        self.device_type = (os.environ.get("CALCIE_DEVICE_TYPE") or inferred_device).strip().lower()
+        default_device_id = "mobile" if self.device_type == "mobile" else "laptop"
+        self.device_id = (os.environ.get("CALCIE_DEVICE_ID") or default_device_id).strip().lower()
+        self.mobile_device_id = (os.environ.get("CALCIE_MOBILE_DEVICE_ID") or "mobile").strip().lower()
+        self.laptop_device_id = (os.environ.get("CALCIE_LAPTOP_DEVICE_ID") or "laptop").strip().lower()
+        self.sync_poll_seconds = self._env_int("CALCIE_SYNC_POLL_SECONDS", 4, 2, 60)
+        self.sync_client = None
+        self._sync_stop = threading.Event()
+        if self.sync_enabled and self.sync_base_url:
+            self.sync_client = CalcieSyncClient(
+                base_url=self.sync_base_url,
+                user_id=self.sync_user_id,
+                device_id=self.device_id,
+                device_type=self.device_type,
+            )
+
         # 1. Load long-term facts
         self.memory_file = "calcie_facts.json"
         self.facts = []
@@ -391,6 +413,31 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
                 with open(self.memory_file, "r") as f:
                     self.facts = json.load(f)
             except: pass
+
+        # Pull latest facts from cloud if enabled, then merge locally.
+        if self.sync_client:
+            try:
+                cloud_facts = self.sync_client.get_facts()
+            except Exception:
+                cloud_facts = []
+            if cloud_facts:
+                merged = []
+                seen = set()
+                for fact in list(self.facts) + list(cloud_facts):
+                    key = str(fact).strip()
+                    if not key:
+                        continue
+                    lowered = key.lower()
+                    if lowered in seen:
+                        continue
+                    seen.add(lowered)
+                    merged.append(key)
+                self.facts = merged
+                try:
+                    with open(self.memory_file, "w") as f:
+                        json.dump(self.facts, f)
+                except Exception:
+                    pass
 
         system_prompt = self.SYSTEM_PROMPT
         if self.facts:
@@ -415,6 +462,14 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
         self._stderr_saved_fd = None
         self._stderr_devnull_fd = None
         threading.Thread(target=self._speech_worker, daemon=True).start()
+
+        # Register device + start background command poller for cross-device routing.
+        if self.sync_client:
+            self.sync_client.register_device(
+                label=f"{self.device_type}-{self.device_id}",
+                metadata={"host": socket.gethostname()},
+            )
+            threading.Thread(target=self._sync_poll_worker, daemon=True).start()
 
     def _select_active_llm(self) -> str:
         """Select active LLM from env override or auto detection."""
@@ -506,6 +561,12 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
         except ValueError:
             return default
         return max(min_value, min(max_value, value))
+
+    def _env_bool(self, name: str, default: bool) -> bool:
+        raw = (os.environ.get(name) or "").strip().lower()
+        if not raw:
+            return default
+        return raw in {"1", "true", "yes", "on"}
 
     def _collect_llm_text(
         self,
@@ -788,6 +849,17 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
 
     def chat(self, user_input: str) -> str:
         """Process user input with streaming and parallel TTS."""
+        routed_response, local_input = self._maybe_route_cross_device_command(user_input)
+        if routed_response is not None:
+            print(f"\033[94mCalcie:\033[0m {routed_response}")
+            self.speak(routed_response)
+            self.conversation_history.append({"role": "user", "content": user_input})
+            self._save_to_db("user", user_input)
+            self.conversation_history.append({"role": "assistant", "content": routed_response})
+            self._save_to_db("assistant", routed_response)
+            return routed_response
+
+        user_input = local_input
         input_type = classify_input(user_input)
         self.conversation_history.append({"role": "user", "content": user_input})
         self._save_to_db("user", user_input)
@@ -928,7 +1000,9 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
             try:
                 with open(self.memory_file, "w") as f:
                     json.dump(self.facts, f)
-            except: pass
+            except:
+                pass
+            self._sync_facts_cloud()
 
         # Handle Tools (Search/Open)
         final_text = re.sub(r'\[.*?\]', '', full_response).strip()
@@ -970,7 +1044,128 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
                 cursor = conn.cursor()
                 cursor.execute('INSERT INTO messages (role, content) VALUES (?, ?)', (role, content))
                 conn.commit()
-        except: pass
+        except:
+            pass
+
+        if self.sync_client and content:
+            try:
+                self.sync_client.add_message(role=role, content=content)
+            except Exception:
+                pass
+
+    def _sync_facts_cloud(self):
+        if not self.sync_client:
+            return
+        try:
+            self.sync_client.set_facts(self.facts)
+        except Exception:
+            pass
+
+    def _extract_target_device_hint(self, user_input: str):
+        raw = (user_input or "").strip()
+        normalized = self._normalize_text(raw)
+        if not normalized:
+            return None, raw
+
+        patterns = [
+            (r"\b(?:on|in|to)\s+(?:my\s+)?(?:mobile|phone|android)\b", "mobile"),
+            (r"\b(?:on|in|to)\s+(?:my\s+)?(?:laptop|desktop|mac|pc)\b", "laptop"),
+        ]
+        stripped = raw
+        target = None
+        for pattern, device in patterns:
+            if re.search(pattern, normalized):
+                target = device
+                stripped = re.sub(pattern, " ", stripped, flags=re.IGNORECASE)
+                stripped = re.sub(r"\s{2,}", " ", stripped).strip(" ,.")
+                break
+        return target, (stripped or raw)
+
+    def _target_device_id_for_hint(self, hint: str) -> str:
+        if hint == "mobile":
+            return self.mobile_device_id
+        if hint == "laptop":
+            return self.laptop_device_id
+        return ""
+
+    def _maybe_route_cross_device_command(self, user_input: str):
+        """Route command to another device when user specifies target device."""
+        if not self.sync_client:
+            return None, user_input
+        target_hint, cleaned = self._extract_target_device_hint(user_input)
+        if not target_hint:
+            return None, user_input
+
+        target_device_id = self._target_device_id_for_hint(target_hint)
+        if not target_device_id:
+            return None, cleaned
+
+        if target_device_id == self.device_id:
+            return None, cleaned
+
+        sent = self.sync_client.send_command(
+            target_device=target_device_id,
+            content=cleaned,
+            requires_confirm=False,
+        )
+        if sent:
+            return f"Routed to {target_hint} device ({target_device_id}): {cleaned}", cleaned
+        return f"Could not route to {target_hint} right now (sync unavailable).", cleaned
+
+    def _execute_remote_device_command(self, command_text: str):
+        """Execute inbound command from another device using deterministic skills first."""
+        text = (command_text or "").strip()
+        if not text:
+            return "Empty command"
+
+        # Avoid re-routing loops for received commands.
+        _, local_text = self._extract_target_device_hint(text)
+        text = local_text.strip() or text
+
+        code_response, _ = self._handle_code_command(text)
+        if code_response is not None:
+            return code_response
+
+        agentic_response, _ = self._handle_agentic_computer_use_command(text)
+        if agentic_response is not None:
+            return agentic_response
+
+        app_response, _ = self.app_skill.handle_command(text)
+        if app_response is not None:
+            return app_response
+
+        computer_response, _ = self._handle_computer_command(text)
+        if computer_response is not None:
+            return computer_response
+
+        search_response, _ = self._handle_search_command(text)
+        if search_response is not None:
+            return search_response
+
+        return "Received command, but it requires interactive context. Open CALCIE chat and continue."
+
+    def _sync_poll_worker(self):
+        while not self._sync_stop.is_set():
+            if not self.sync_client:
+                time.sleep(self.sync_poll_seconds)
+                continue
+            try:
+                commands = self.sync_client.poll_commands(limit=10)
+                for cmd in commands:
+                    cmd_id = int(cmd.get("id") or 0)
+                    content = str(cmd.get("content") or "").strip()
+                    if not cmd_id or not content:
+                        continue
+                    result = self._execute_remote_device_command(content)
+                    status = "done"
+                    if "could not" in result.lower() or "failed" in result.lower():
+                        status = "failed"
+                    self.sync_client.ack_command(cmd_id, status=status, result=result)
+                    self._save_to_db("user", f"[remote:{cmd.get('from_device')}] {content}")
+                    self._save_to_db("assistant", result)
+            except Exception:
+                pass
+            time.sleep(self.sync_poll_seconds)
 
     def web_search(self, query: str) -> str:
         """Search the web using DuckDuckGo."""

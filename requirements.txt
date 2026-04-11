@@ -14,3 +14,5 @@ tavily-python      # Tavily SDK (research + polling)
 exa-py             # Exa SDK (fast search + contents)
 pyautogui          # Desktop automation backend for computer-control skill
 pillow             # Image handling and pyautogui screenshot support
+fastapi            # V1 mobile/laptop sync API
+uvicorn            # ASGI server for sync API

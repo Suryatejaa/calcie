@@ -15,7 +15,13 @@ calcie_facts.json
 # Temporary files
 *.tmp
 *.mp3
+sync_server.db
 
 # IDE
 .vscode/
 .idea/
+
+# Mobile app
+mobile_v1/node_modules/
+mobile_v1/.expo/
+mobile_v1/.env

@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "CALCIE Mobile V1",
+    "slug": "calcie-mobile-v1",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "platforms": [
+      "android"
+    ],
+    "android": {
+      "package": "com.calcie.mobilev1"
+    },
+    "plugins": [
+      "expo-asset"
+    ]
+  }
+}

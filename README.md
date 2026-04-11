@@ -21,6 +21,7 @@ Core modules:
 - `calcie_core/intent.py` -> activation/classification/intent logic
 - `calcie_core/search_utils.py` -> search/sports/news utility parsing
 - `calcie_core/code_tools.py` -> safe code read + proposal/apply workflow
+- `calcie_core/sync_client.py` -> cloud sync client for messages/facts/device commands
 
 Skills:
 - `calcie_core/skills/app_access.py`
@@ -41,6 +42,10 @@ Persistence:
 - `calcie_facts.json` -> long-term facts memory
 - `.calcie/` -> proposals, backups, computer artifacts
 
+Cloud/mobile V1:
+- `calcie_cloud/server.py` -> FastAPI sync backend
+- `mobile_v1/` -> Android-first Expo app scaffold
+
 ## 2) Runtime flow
 
 1. Start `python3 calcie.py`.
@@ -56,6 +61,7 @@ Persistence:
    - searching skill
    - then general LLM response
 5. Assistant response is streamed and spoken with TTS queue.
+6. If sync is enabled, CALCIE polls inbound cross-device commands and executes locally.
 
 ## 3) LLM provider behavior
 
@@ -101,6 +107,7 @@ Behavior:
 - sanitizes LLM plans before execution (rewrites/drops invalid tool steps)
 - stops early after repeated failed steps to avoid runaway bad actions
 - with confirmation enabled, CALCIE previews plan first and waits for `confirm`
+- supports cross-device routing phrases: `... on mobile` / `... on laptop`
 
 ### Coding (safe proposal workflow)
 Examples:
@@ -202,6 +209,16 @@ Safety model:
 - `CALCIE_COMPUTER_USE_AUTO_ARM` (`0|1`)
 - `CALCIE_COMPUTER_USE_REQUIRE_CONFIRM` (`0|1`)
 
+### Cross-device sync (mobile/laptop V1)
+- `CALCIE_SYNC_ENABLED` (`0|1`)
+- `CALCIE_SYNC_BASE_URL` (example: `http://127.0.0.1:8000`)
+- `CALCIE_SYNC_USER_ID`
+- `CALCIE_DEVICE_TYPE` (`laptop|mobile`)
+- `CALCIE_DEVICE_ID`
+- `CALCIE_MOBILE_DEVICE_ID`
+- `CALCIE_LAPTOP_DEVICE_ID`
+- `CALCIE_SYNC_POLL_SECONDS`
+
 ### Computer control skill
 - `CALCIE_COMPUTER_CONTROL_ENABLED` (`0|1`)
 - `CALCIE_COMPUTER_REQUIRE_ARM` (`0|1`)
@@ -220,6 +237,12 @@ python3 -m pip install -r requirements.txt
 python3 calcie.py
 ```
 
+Optional V1 sync backend:
+```bash
+python3 -m pip install -r calcie_cloud/requirements.txt
+python3 -m uvicorn calcie_cloud.server:app --host 0.0.0.0 --port 8000
+```
+
 Recommended first boot:
 1. set at least one LLM API key in `.env`
 2. keep `CALCIE_COMPUTER_DRY_RUN=1` initially
@@ -228,6 +251,48 @@ Recommended first boot:
    - `search latest ai news`
    - `code tree`
    - `open chrome`
+
+### Mobile V1 quick start
+1. Start sync backend:
+```bash
+uvicorn calcie_cloud.server:app --host 0.0.0.0 --port 8000
+```
+2. On laptop `.env`:
+- `CALCIE_SYNC_ENABLED=1`
+- `CALCIE_SYNC_BASE_URL=<reachable URL>`
+- `CALCIE_SYNC_USER_ID=<same on all devices>`
+- `CALCIE_DEVICE_ID=laptop`
+3. In `mobile_v1/.env`, set:
+- `EXPO_PUBLIC_CALCIE_API_BASE_URL=<reachable URL>`
+- `EXPO_PUBLIC_CALCIE_USER_ID=<same as laptop>`
+- `EXPO_PUBLIC_CALCIE_DEVICE_ID=mobile`
+- `EXPO_PUBLIC_CALCIE_LAPTOP_DEVICE_ID=laptop`
+4. Run mobile app:
+```bash
+cd mobile_v1
+npm install
+npx expo start --lan
+```
+
+## 6.1) Backend deployment (production)
+
+Fast path:
+1. Use Docker with `calcie_cloud/Dockerfile`.
+2. Deploy to Render/Railway/Fly (any Docker host).
+3. Set env:
+- `CALCIE_SYNC_DB_PATH=/data/sync_server.db`
+4. Mount persistent volume at `/data`.
+5. Health check path: `/health`.
+
+Local Docker test:
+```bash
+docker build -f calcie_cloud/Dockerfile -t calcie-sync:latest .
+docker run --rm -p 8000:8000 -e CALCIE_SYNC_DB_PATH=/data/sync_server.db calcie-sync:latest
+```
+
+Then point devices:
+- laptop `.env`: `CALCIE_SYNC_BASE_URL=https://<your-backend-domain>`
+- mobile `mobile_v1/.env`: `EXPO_PUBLIC_CALCIE_API_BASE_URL=https://<your-backend-domain>`
 
 ## 7) macOS permissions (required for real computer control)
 
@@ -285,6 +350,12 @@ Agentic plan quality issues:
 - set `CALCIE_COMPUTER_USE_PROVIDER=openai` (or `claude`) for stronger planning
 - reduce step count with `CALCIE_COMPUTER_USE_MAX_STEPS=4` for tighter execution
 
+Sync issues:
+- set `CALCIE_SYNC_ENABLED=1` on participating devices
+- use the same `CALCIE_SYNC_USER_ID` on laptop and mobile
+- keep unique `CALCIE_DEVICE_ID` values (for example `laptop`, `mobile`)
+- verify mobile can reach `CALCIE_SYNC_BASE_URL` over network
+
 ## 10) Security note
 
 Do not commit real API keys to git.
@@ -315,8 +386,10 @@ Apps/media:
 Agentic:
 - `order a 72x60 mattress from amazon`
 - `play one piece on netflix in chrome`
-- `confirm` 
-- `cancel` 
+- `confirm`
+- `cancel`
+- `play music on mobile`
+- `play music on laptop`
 
 Computer:
 - `control status`
