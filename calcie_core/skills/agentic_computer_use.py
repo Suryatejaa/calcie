@@ -7,6 +7,8 @@ import os
 import re
 from typing import Callable, Dict, List, Optional, Tuple
 
+from calcie_core.prompts import AGENTIC_PLAN_PROMPT
+
 
 class AgenticComputerUseSkill:
     """Multi-step task orchestrator for essential real-world tasks only."""
@@ -142,31 +144,7 @@ class AgenticComputerUseSkill:
         return any(m in normalized for m in essential_markers)
 
     def _build_plan(self, user_input: str) -> Optional[Dict]:
-        system_prompt = (
-            "You are a desktop task planner. "
-            "Return only strict JSON. No markdown. "
-            "Goal: create a safe, concise action plan using available tools.\n"
-            "Allowed tools:\n"
-            "1) app.open_app {app}\n"
-            "2) app.open_target_in_app {target, app}\n"
-            "3) app.play {command}\n"
-            "4) search.query {query}\n"
-            "5) computer.command {command}\n"
-            "6) say {text}\n"
-            "Output schema:\n"
-            "{"
-            "\"goal\":\"string\","
-            "\"risk\":\"low|medium|high\","
-            "\"steps\":[{\"tool\":\"...\",\"args\":{...},\"why\":\"string\"}]"
-            "}\n"
-            "Rules:\n"
-            "- max 6 steps\n"
-            "- never finalize payment/place order\n"
-            "- for shopping: stop at cart/review stage\n"
-            "- for movie playback: open platform search/title and start playback page\n"
-            "- use specific URL targets for app.open_target_in_app when helpful\n"
-            "- steps must be executable by tools exactly\n"
-        )
+        system_prompt = AGENTIC_PLAN_PROMPT
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_input},

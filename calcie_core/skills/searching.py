@@ -9,6 +9,8 @@ import urllib.request
 from html import unescape
 from typing import Callable, Dict, List, Optional, Tuple
 
+from calcie_core.prompts import SEARCH_SYNTH_SYSTEM_PROMPT, SEARCH_SYNTH_USER_TEMPLATE
+
 try:
     from tavily import TavilyClient  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
@@ -28,7 +30,7 @@ except Exception:  # pragma: no cover - optional dependency
 class SearchingSkill:
     def __init__(
         self,
-        llm_collect_text: Callable[[list, int], str],
+        llm_collect_text: Callable[..., str],
         fallback_search: Optional[Callable[[str], str]] = None,
         max_results: int = 5,
         max_source_chars: int = 5000,
@@ -43,7 +45,17 @@ class SearchingSkill:
         self.allow_fallback = (os.environ.get("CALCIE_SEARCH_ALLOW_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"})
         self.research_timeout_s = max(8, min(60, int(os.environ.get("CALCIE_RESEARCH_TIMEOUT_S", "24"))))
         self.research_poll_s = max(0.6, min(3.0, float(os.environ.get("CALCIE_RESEARCH_POLL_S", "1.0"))))
+        self.tavily_mode = (os.environ.get("CALCIE_TAVILY_MODE") or "search").strip().lower()
+        if self.tavily_mode not in {"search", "research"}:
+            self.tavily_mode = "search"
+        self.search_http_timeout_s = max(6, min(30, int(os.environ.get("CALCIE_SEARCH_HTTP_TIMEOUT_S", "10"))))
+        self.page_fetch_timeout_s = max(2, min(20, int(os.environ.get("CALCIE_SEARCH_PAGE_FETCH_TIMEOUT_S", "4"))))
+        self.scrape_top_k = max(2, min(5, int(os.environ.get("CALCIE_SEARCH_SCRAPE_TOP_K", "3"))))
+        self.synth_tokens = max(120, min(480, int(os.environ.get("CALCIE_SEARCH_SYNTH_TOKENS", "220"))))
+        self.search_llm_provider = (os.environ.get("CALCIE_SEARCH_LLM_PROVIDER") or "auto").strip().lower()
         self.ddgs_fallback_results = max(3, min(8, int(os.environ.get("CALCIE_DDGS_FALLBACK_RESULTS", "5"))))
+        self.show_sources = (os.environ.get("CALCIE_SEARCH_SHOW_SOURCES", "1").strip().lower() in {"1", "true", "yes", "on"})
+        self.debug_output = (os.environ.get("CALCIE_SEARCH_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"})
         self._tavily_client = TavilyClient(api_key=self.tavily_api_key) if TavilyClient and self.tavily_api_key else None
         self._exa_client = Exa(api_key=self.exa_api_key) if Exa and self.exa_api_key else None
 
@@ -91,26 +103,29 @@ class SearchingSkill:
         if not results:
             if self.allow_fallback and self.fallback_search:
                 fallback = self.fallback_search(query_for_provider)
-                return f"Web search fallback:\n{fallback}", "Web fallback ready."
+                return fallback, fallback
             attempts = " | ".join(attempted) if attempted else "no providers configured"
             return f"Search failed: no usable results. Attempts: {attempts}", "Search failed."
 
         scraped = self._scrape_results(results[: self.max_results])
         if not scraped:
-            lines = [f"Top results for '{query}':"]
-            for r in results[: self.max_results]:
-                lines.append(f"- {r.get('title', 'Untitled')}: {r.get('url', '')}")
-            return "\n".join(lines), "Top links ready."
+            scraped = self._build_scrape_fallback_from_results(results)
+            if not scraped:
+                lines = [f"I could not extract enough page content for: {query}"]
+                for r in results[: self.max_results]:
+                    lines.append(f"- {r.get('title', 'Untitled')}: {r.get('url', '')}")
+                return "\n".join(lines), "Top links ready."
 
         summary = self._synthesize(query, scraped)
-        src_lines = [f"- {item['title']} ({item['url']})" for item in scraped[: self.max_results]]
-        response = (
-            f"Search summary for: {query}\n\n"
-            f"{summary}\n\n"
-            f"Search provider used: {provider_used}\n"
-            f"Provider attempts: {' | '.join(attempted)}\n\n"
-            "Sources used:\n" + "\n".join(src_lines)
-        )
+        response = summary.strip()
+        if self.show_sources:
+            src_lines = [f"- {item['title']} ({item['url']})" for item in scraped[: self.max_results]]
+            response = response + "\n\nSources:\n" + "\n".join(src_lines)
+        if self.debug_output:
+            response = (
+                response
+                + f"\n\n[debug] provider={provider_used} | attempts={' | '.join(attempted)}"
+            )
         return response, summary
 
     def _search(self, query: str) -> Tuple[List[Dict[str, str]], str, List[str]]:
@@ -156,8 +171,8 @@ class SearchingSkill:
         return [], "none", attempts
 
     def _search_tavily(self, query: str) -> Tuple[List[Dict[str, str]], str]:
-        # Preferred path: Tavily SDK deep research with polling.
-        if self._tavily_client:
+        # Optional deep-research path (slower).
+        if self.tavily_mode == "research" and self._tavily_client:
             try:
                 initial = self._tavily_client.research(query)
                 request_id = (initial or {}).get("request_id")
@@ -189,11 +204,11 @@ class SearchingSkill:
             "api_key": self.tavily_api_key,
             "query": query,
             "max_results": self.max_results,
-            "search_depth": "advanced",
+            "search_depth": "basic",
             "include_answer": False,
-            "include_raw_content": True,
+            "include_raw_content": False,
         }
-        body, err = self._post_json(url, payload, timeout=20)
+        body, err = self._post_json(url, payload, timeout=self.search_http_timeout_s)
         if not body:
             if self._is_quota_error(err or ""):
                 return [], "quota_exhausted"
@@ -243,7 +258,7 @@ class SearchingSkill:
             url,
             payload,
             headers={"x-api-key": self.exa_api_key},
-            timeout=20,
+            timeout=self.search_http_timeout_s,
         )
         if not body:
             if self._is_quota_error(err or ""):
@@ -287,7 +302,7 @@ class SearchingSkill:
 
     def _scrape_results(self, results: List[Dict[str, str]]) -> List[Dict[str, str]]:
         scraped = []
-        for item in results[: self.max_results]:
+        for item in results[: self.scrape_top_k]:
             url = item.get("url", "").strip()
             if not url:
                 continue
@@ -315,9 +330,9 @@ class SearchingSkill:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=12) as res:
+            with urllib.request.urlopen(req, timeout=self.page_fetch_timeout_s) as res:
                 content_type = (res.headers.get("Content-Type") or "").lower()
-                raw = res.read(300_000)
+                raw = res.read(160_000)
         except (urllib.error.URLError, ValueError, OSError):
             return ""
 
@@ -342,24 +357,20 @@ class SearchingSkill:
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are a factual synthesis engine. Use only provided sources. "
-                    "Resolve contradictions by reporting uncertainty. No hallucinations. "
-                    "No roleplay, no jokes, no meta commentary, no placeholders."
-                ),
+                "content": SEARCH_SYNTH_SYSTEM_PROMPT,
             },
             {
                 "role": "user",
-                "content": (
-                    f"Query: {query}\n\n"
-                    "Based on these sources, extract core facts, resolve contradictions, "
-                    "and return exactly 3 concise sentences.\n"
-                    "Do not say things like '*searches*', 'let me know', or '[insert ...]'.\n\n"
-                    f"{source_blob}"
-                ),
+                "content": SEARCH_SYNTH_USER_TEMPLATE.format(query=query, source_blob=source_blob),
             },
         ]
-        summary = self.llm_collect_text(messages, max_output_tokens=280)
+        llm_kwargs = {}
+        if self.search_llm_provider and self.search_llm_provider != "auto":
+            llm_kwargs["forced_provider"] = self.search_llm_provider
+        try:
+            summary = self.llm_collect_text(messages, max_output_tokens=self.synth_tokens, **llm_kwargs)
+        except TypeError:
+            summary = self.llm_collect_text(messages, max_output_tokens=self.synth_tokens)
         if summary and "model error" not in summary.lower():
             cleaned = summary.strip()
             if self._is_summary_acceptable(query, cleaned):
@@ -615,6 +626,22 @@ class SearchingSkill:
         sentence2 = f"Corroborating sources include: {second}." if second else "I used multiple sources to cross-check the key facts."
         sentence3 = f"Additional context: {third}." if third else "Expanded bullet summary is available on request."
         return f"Top verified update: {headline}. {sentence2} {sentence3}"
+
+    def _build_scrape_fallback_from_results(self, results: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        fallback = []
+        for item in results[: self.max_results]:
+            text = (item.get("snippet") or item.get("text") or "").strip()
+            url = (item.get("url") or "").strip()
+            if not text or not url:
+                continue
+            fallback.append(
+                {
+                    "title": (item.get("title") or "Untitled").strip(),
+                    "url": url,
+                    "text": text[: self.max_source_chars],
+                }
+            )
+        return fallback
 
     def _extract_ipl_points_lines(self, sources: List[Dict[str, str]]) -> List[str]:
         combined = " ".join((s.get("text") or "") for s in sources[: self.max_results])

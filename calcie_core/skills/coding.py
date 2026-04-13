@@ -5,6 +5,7 @@ import re
 from typing import Callable, Optional, Tuple
 
 from calcie_core.code_tools import ReadOnlyCodeTools
+from calcie_core.prompts import CODE_SKILL_PROMPT
 
 
 class CodingSkill:
@@ -36,9 +37,8 @@ class CodingSkill:
             {
                 "role": "system",
                 "content": (
-                    "You are CALCIE in code mode. "
-                    "Read-only unless user explicitly requests propose/apply workflow. "
-                    "Use provided context only. If missing context, suggest exact next file to inspect."
+                    f"{CODE_SKILL_PROMPT} "
+                    "Read-only unless user explicitly requests propose/apply workflow."
                 ),
             },
             {
@@ -276,4 +276,3 @@ class CodingSkill:
             return "Usage: code discard <proposal_id>", "Invalid discard command."
 
         return self.answer_code_with_context(raw), "Generated code analysis."
-

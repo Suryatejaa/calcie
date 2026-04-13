@@ -25,3 +25,6 @@ sync_server.db
 mobile_v1/node_modules/
 mobile_v1/.expo/
 mobile_v1/.env
+mobile_v2/node_modules/
+mobile_v2/.expo/
+mobile_v2/.env

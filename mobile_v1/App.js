@@ -17,6 +17,8 @@ const USER_ID = process.env.EXPO_PUBLIC_CALCIE_USER_ID || "surya";
 const DEVICE_ID = process.env.EXPO_PUBLIC_CALCIE_DEVICE_ID || "mobile";
 const DEVICE_TYPE = "mobile";
 const LAPTOP_DEVICE_ID = process.env.EXPO_PUBLIC_CALCIE_LAPTOP_DEVICE_ID || "laptop";
+// app_only | app_first
+const APP_OPEN_MODE = process.env.EXPO_PUBLIC_CALCIE_APP_OPEN_MODE || "app_only";
 
 function normalize(input) {
   return String(input || "")
@@ -34,6 +36,125 @@ function stripTargetPhrase(text) {
   return out || text;
 }
 
+function androidIntentForPackage(packageName) {
+  return `intent://#Intent;package=${packageName};end`;
+}
+
+const APP_ROUTES = [
+  {
+    regex: /\bwhats\s?app\b/,
+    name: "WhatsApp",
+    packageName: "com.whatsapp",
+    appUrls: ["whatsapp://send", "whatsapp://", "https://api.whatsapp.com"],
+    fallbackUrl: "https://wa.me/",
+  },
+  {
+    regex: /\bphone\b|\bdialer\b|\bcall app\b/,
+    name: "Phone",
+    packageName: "com.google.android.dialer",
+    appUrls: ["tel:", "tel://"],
+    fallbackUrl: "",
+  },
+  {
+    regex: /\btelegram\b/,
+    name: "Telegram",
+    packageName: "org.telegram.messenger",
+    appUrls: ["tg://resolve"],
+    fallbackUrl: "https://t.me/",
+  },
+  {
+    regex: /\binstagram\b|\big\b/,
+    name: "Instagram",
+    packageName: "com.instagram.android",
+    appUrls: ["instagram://app"],
+    fallbackUrl: "https://www.instagram.com",
+  },
+  {
+    regex: /\bfacebook\b|\bfb\b/,
+    name: "Facebook",
+    packageName: "com.facebook.katana",
+    appUrls: ["fb://facewebmodal/f?href=https://www.facebook.com"],
+    fallbackUrl: "https://www.facebook.com",
+  },
+  {
+    regex: /\bspotify\b/,
+    name: "Spotify",
+    packageName: "com.spotify.music",
+    appUrls: ["spotify://"],
+    fallbackUrl: "https://open.spotify.com",
+  },
+  {
+    regex: /\byoutube music\b|\byt music\b|\bytmusic\b/,
+    name: "YouTube Music",
+    packageName: "com.google.android.apps.youtube.music",
+    appUrls: ["youtubemusic://", "vnd.youtube.music://"],
+    fallbackUrl: "https://music.youtube.com",
+  },
+  {
+    regex: /\byoutube\b|\byt\b/,
+    name: "YouTube",
+    packageName: "com.google.android.youtube",
+    appUrls: ["vnd.youtube://", "youtube://"],
+    fallbackUrl: "https://www.youtube.com",
+  },
+  {
+    regex: /\bnetflix\b/,
+    name: "Netflix",
+    packageName: "com.netflix.mediaclient",
+    appUrls: ["nflx://www.netflix.com"],
+    fallbackUrl: "https://www.netflix.com",
+  },
+  {
+    regex: /\bprime video\b|\bamazon prime\b/,
+    name: "Prime Video",
+    packageName: "com.amazon.avod.thirdpartyclient",
+    appUrls: ["primevideo://"],
+    fallbackUrl: "https://www.primevideo.com",
+  },
+  {
+    regex: /\bhotstar\b|\bdisney\b/,
+    name: "Disney+ Hotstar",
+    packageName: "in.startv.hotstar",
+    appUrls: ["hotstar://"],
+    fallbackUrl: "https://www.hotstar.com",
+  },
+  {
+    regex: /\bamazon\b/,
+    name: "Amazon Shopping",
+    packageName: "in.amazon.mShop.android.shopping",
+    appUrls: ["amazon://"],
+    fallbackUrl: "https://www.amazon.in",
+  },
+  {
+    regex: /\bgmail\b|\bemail\b/,
+    name: "Gmail",
+    packageName: "com.google.android.gm",
+    appUrls: ["googlegmail://"],
+    fallbackUrl: "https://mail.google.com",
+  },
+  {
+    regex: /\bgoogle maps\b|\bmaps\b/,
+    name: "Google Maps",
+    packageName: "com.google.android.apps.maps",
+    appUrls: ["geo:0,0?q=", "google.navigation:q=home"],
+    fallbackUrl: "https://maps.google.com",
+  },
+  {
+    regex: /\bchrome\b/,
+    name: "Google Chrome",
+    packageName: "com.android.chrome",
+    appUrls: ["googlechrome://"],
+    fallbackUrl: "https://www.google.com",
+  },
+  {
+    regex: /\bplay store\b/,
+    name: "Play Store",
+    packageName: "com.android.vending",
+    appUrls: ["market://search?q=apps"],
+    fallbackUrl: "https://play.google.com/store",
+  },
+];
+
 async function api(path, options = {}) {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -44,6 +165,57 @@ async function api(path, options = {}) {
     throw new Error(`HTTP ${res.status}: ${body}`);
   }
   return await res.json();
+}
+
+async function tryOpenAppUrls(urls = []) {
+  for (const url of urls) {
+    if (!url) continue;
+    try {
+      // On Android, canOpenURL can be false for valid custom schemes
+      // depending on package visibility rules; direct open is more reliable.
+      await Linking.openURL(url);
+      return url;
+    } catch {
+      // try next url candidate
+    }
+  }
+  return "";
+}
+
+async function openKnownAppTarget(target) {
+  const norm = normalize(target);
+  if (!norm) return "";
+
+  for (const route of APP_ROUTES) {
+    if (!route.regex.test(norm)) continue;
+
+    const urlCandidates = [...(route.appUrls || [])];
+    if (route.packageName) {
+      urlCandidates.push(androidIntentForPackage(route.packageName));
+    }
+
+    const openedUrl = await tryOpenAppUrls(urlCandidates);
+    if (openedUrl) return `Opened ${route.name} app.`;
+
+    if (route.packageName) {
+      const storeUrl = `market://details?id=${route.packageName}`;
+      const openedStoreUrl = await tryOpenAppUrls([storeUrl]);
+      if (openedStoreUrl) {
+        return `Opened Play Store for ${route.name} (app may not be installed).`;
+      }
+    }
+
+    if (APP_OPEN_MODE === "app_only") {
+      return `Couldn't open ${route.name} app on this device.`;
+    }
+
+    if (route.fallbackUrl) {
+      await Linking.openURL(route.fallbackUrl);
+      return `Opened ${route.name} in browser (app launch unavailable).`;
+    }
+    return `Couldn't open ${route.name} app on this device.`;
+  }
+  return "";
 }
 
 async function openMusic(command) {
@@ -79,6 +251,13 @@ async function openTarget(command) {
   target = stripTargetPhrase(target);
 
   if (!target) return "No target found.";
+
+  const forceBrowser = /\b(in|on)\s+(?:google\s+)?chrome\b|\bbrowser\b|\bweb\b/i.test(raw);
+  if (!forceBrowser) {
+    const appResult = await openKnownAppTarget(target);
+    if (appResult) return appResult;
+  }
+
   if (/^https?:\/\//i.test(target)) {
     url = target;
   } else if (/amazon/.test(norm)) {

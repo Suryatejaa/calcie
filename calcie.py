@@ -11,10 +11,12 @@ os.environ["GLOG_minloglevel"] = "2"
 
 import sys
 import json
+import base64
 import urllib.request
 import urllib.error
 import urllib.parse
 import socket
+import random
 
 import time
 import threading
@@ -27,6 +29,13 @@ import asyncio
 import subprocess
 import edge_tts
 from dotenv import load_dotenv
+from calcie_core.orchestration import CommandArbiter
+from calcie_core.prompts import (
+    GENERAL_CHAT_PROMPT,
+    PROFILE_CHAT_PROMPT,
+    WEB_GROUNDED_CHAT_PROMPT,
+    build_profile_context,
+)
 from calcie_core.intent import (
     activation_signal as core_activation_signal,
     classify_input as core_classify_input,
@@ -133,93 +142,7 @@ except ImportError:
 
 class Calcie:
     """Personal AI assistant powered by Ollama."""
-    SYSTEM_PROMPT = """You are CALCIE — Surya's personal AI companion and best friend.
-
-Think Chandler Bing meets a really smart startup friend who actually gets things done.
-
----
-
-### WHO YOU ARE
-
-You're not a productivity app. You're not a life coach. You're not a therapist.
-You're the friend Surya calls at 11pm when he has a half-baked idea and needs someone 
-to either get excited with him or gently tell him it's terrible — without being a jerk about it.
-
-You happen to be incredibly capable:
-- You can search the web for real-time info
-- You remember things Surya tells you across conversations
-- You can help him build, plan, debug, and think
-
-But you wear all of this lightly. You don't announce your capabilities. You just... use them.
-
----
-
-### SURYA
-
-- Developer at Infosys, wants to escape and build his own thing
-- Building CALCIE (you) as his first serious AI project
-- Has shipped 2 MVPs before, stepping into AI now
-- Financially constrained but ambitious
-- Loves sarcasm, dark humor, casual conversation
-- Prefers "man" energy — chill, direct, no corporate speak
-
----
-
-### YOUR VIBE
-
-Chandler Bing rules:
-- Sarcastic but never mean
-- Self-aware and a little self-deprecating
-- Funny without trying too hard
-- Always there when it actually matters
-- Never lectures. Never moralizes. Never repeats the same point twice.
-
-If Surya asks about IPL scores, you check and tell him. 
-You don't give him a TED talk about focus.
-If he's clearly procrastinating, you notice — but you say it once, lightly, and move on.
-You trust him to be an adult.
-
-Wrong vibe: "Stop testing my capabilities. Start testing your commitment."
-Right vibe: "IPL scores? Sure, hold on... also you do realize this is the 4th cricket 
-             query today right? Just saying."
-
----
-
-### RESPONSE LENGTH
-
-- Greeting / small talk → max 15 words, witty, done
-- Real question → detailed, structured, useful, with a light touch of humor
-- Mixed (greeting + question) → skip the greeting, answer the question
-
----
-
-### TONE EXAMPLES
-
-User: "hey"
-CALCIE: "Hey. Productive day or are we just vibing?"
-
-User: "define me"
-CALCIE: "Ambitious developer who builds cool things and occasionally needs reminding 
-         that he's already further along than he thinks. That's you, man."
-
-User: "what's the current ipl score"
-CALCIE: *searches web* "Chennai are 156/4 in 18 overs. Also hi, good to know 
-         your priorities are in order."
-
-User: "I feel like giving up"
-CALCIE: "Yeah that's a mood. What happened? Talk to me."
-
----
-
-### THE ONE RULE
-
-If your response would make Surya feel judged, lectured, or talked down to — rewrite it.
-You're his friend first. Everything else is secondary.
-
----
-
-You are CALCIE. Not a tool. Not a coach. A friend who happens to be really useful.
-"""
+    SYSTEM_PROMPT = GENERAL_CHAT_PROMPT
     WAKE_WORDS = [
         "calcie", "kelsey", "kelsie", "kelcey", "calcy", "calsie",
         "calsi", "kalsi", "kalki", "calc", "cal c", "cal", "cali", "lc",
@@ -338,7 +261,49 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
         self.quick_max_output_tokens = self._env_int("CALCIE_QUICK_MAX_OUTPUT_TOKENS", 180, 60, 600)
         self.code_max_output_tokens = self._env_int("CALCIE_CODE_MAX_OUTPUT_TOKENS", 1400, 400, 6000)
         self.code_max_file_chars = self._env_int("CALCIE_CODE_MAX_FILE_CHARS", 30000, 4000, 200000)
+        self.router_confidence_threshold = self._env_float(
+            "CALCIE_ROUTER_CONFIDENCE_THRESHOLD", 0.62, 0.35, 0.95
+        )
+        self.router_ambiguous_delta = self._env_float(
+            "CALCIE_ROUTER_AMBIGUOUS_DELTA", 0.08, 0.02, 0.2
+        )
+        self.router_leading_fix_threshold = self._env_float(
+            "CALCIE_ROUTER_LEADING_FIX_THRESHOLD", 0.76, 0.68, 0.95
+        )
+        self.router_debug = self._env_bool("CALCIE_ROUTER_DEBUG", False)
+        self.feedback_enabled = self._env_bool("CALCIE_FEEDBACK_ENABLED", True)
+        self.feedback_ack_speak_enabled = self._env_bool("CALCIE_FEEDBACK_ACK_SPEAK_ENABLED", True)
+        self.feedback_ack_delay_s = self._env_float("CALCIE_FEEDBACK_ACK_DELAY_S", 1.0, 0.0, 4.0)
+        self.feedback_speak = self._env_bool("CALCIE_FEEDBACK_SPEAK", True)
+        self.feedback_print = self._env_bool("CALCIE_FEEDBACK_PRINT", True)
+        self.feedback_min_chars = self._env_int("CALCIE_FEEDBACK_MIN_INPUT_CHARS", 2, 1, 120)
+        self.feedback_preempt_on_result = self._env_bool("CALCIE_FEEDBACK_PREEMPT_ON_RESULT", True)
+        self.feedback_bridge_inline = self._env_bool("CALCIE_FEEDBACK_BRIDGE_INLINE", True)
+        self.feedback_speak_kinds = self._env_kind_set(
+            "CALCIE_FEEDBACK_SPEAK_KINDS",
+            default={"general", "search", "profile", "coding", "agentic"},
+        )
+        self.feedback_bridge_kinds = self._env_kind_set(
+            "CALCIE_FEEDBACK_BRIDGE_KINDS",
+            default={"general", "search", "profile", "coding", "agentic"},
+        )
+        self.tts_chunk_chars = self._env_int("CALCIE_TTS_CHUNK_CHARS", 170, 80, 500)
+        self.tts_debug = self._env_bool("CALCIE_TTS_DEBUG", False)
+        self.tts_provider_mode = (
+            os.environ.get("CALCIE_TTS_PROVIDER", "auto").strip().lower()
+        )
+        if self.tts_provider_mode not in {"auto", "google", "edge", "offline"}:
+            self.tts_provider_mode = "auto"
+        self.google_tts_use_adc = self._env_bool("CALCIE_GOOGLE_TTS_USE_ADC", True)
+        self.google_tts_adc_ttl_s = self._env_int("CALCIE_GOOGLE_TTS_ADC_TTL_S", 2700, 300, 3600)
+        self._google_access_token_cache = ""
+        self._google_access_token_expires_at = 0.0
+        self._google_access_token_lock = threading.Lock()
+        self.google_tts_disabled = False
+        self.google_tts_disable_reason = ""
+        self.google_tts_disable_logged = False
         self.project_root = Path.cwd().resolve()
+        self.feedback_phrases = self._load_feedback_phrases()
         self.code_tools_enabled = os.environ.get("CALCIE_CODE_TOOLS_ENABLED", "1").strip().lower() in {
             "1", "true", "yes", "on"
         }
@@ -367,6 +332,11 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
             app_skill=self.app_skill,
             computer_skill=self.computer_skill,
             searching_skill=self.searching_skill,
+        )
+        self.command_arbiter = CommandArbiter(
+            threshold=self.router_confidence_threshold,
+            ambiguous_delta=self.router_ambiguous_delta,
+            leading_correction_threshold=self.router_leading_fix_threshold,
         )
         self.calcie_data_dir = self.project_root / ".calcie"
         preferred_gemini_model = os.environ.get("GEMINI_MODEL", "gemini-robotics-er-1.5-preview")
@@ -439,15 +409,19 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
                 except Exception:
                     pass
 
-        system_prompt = self.SYSTEM_PROMPT
-        if self.facts:
-            system_prompt += "\n[Background context about Surya - do not mention this list aloud]:\n"
-            for f in self.facts:
-                system_prompt += f"- {f}\n"
+        self.profile_file = "calcie_profile.json"
+        self.profile_data = {}
+        if os.path.exists(self.profile_file):
+            try:
+                with open(self.profile_file, "r") as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        self.profile_data = loaded
+            except Exception:
+                self.profile_data = {}
 
-        self.conversation_history = [
-            {"role": "system", "content": system_prompt}
-        ]
+        # Keep history as user/assistant only. Route-specific system prompts are injected per request.
+        self.conversation_history = []
 
         # 2. Init SQLite session history
         self.db_path = "calcie_history.db"
@@ -457,6 +431,8 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
         # 3. Init speech worker
         self.speech_queue = queue.Queue()
         self.is_speaking = False
+        self._pending_ack_timer = None
+        self._pending_ack_lock = threading.Lock()
         self._stderr_redirect_lock = threading.Lock()
         self._stderr_redirect_depth = 0
         self._stderr_saved_fd = None
@@ -526,6 +502,212 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
             return True
         return False
 
+    def _load_feedback_phrases(self):
+        fallback = {
+            "ack": {
+                "general": [
+                    "On it.",
+                    "Working on that now.",
+                    "Give me a second.",
+                    "Let me check that.",
+                ],
+                "search": [
+                    "Checking live sources now.",
+                    "Pulling recent web results.",
+                    "Searching trusted sources.",
+                    "Looking that up now.",
+                ],
+                "profile": [
+                    "Pulling your profile context.",
+                    "Let me summarize what I know about you.",
+                    "Checking your saved facts now.",
+                    "Give me a second, assembling your profile.",
+                ],
+                "coding": [
+                    "Scanning code context now.",
+                    "Checking the repo quickly.",
+                    "Analyzing the relevant files.",
+                    "Let me inspect the code path.",
+                ],
+                "app": [
+                    "Got it, handling that action.",
+                    "Executing that command now.",
+                    "Working on the app task.",
+                    "Doing that now.",
+                ],
+                "computer": [
+                    "Computer action queued.",
+                    "Running that control step.",
+                    "Executing your control command.",
+                    "Handling that desktop action.",
+                ],
+                "agentic": [
+                    "Planning that multi-step task.",
+                    "Building a safe action plan.",
+                    "Working through the steps now.",
+                    "Orchestrating that request now.",
+                ],
+            },
+            "bridge": {
+                "general": ["Here is what I found."],
+                "search": ["Here are the latest results."],
+                "profile": ["Here is your profile summary."],
+                "coding": ["Here is what I found in the code."],
+                "app": ["Done. Here is the outcome."],
+                "computer": ["Action complete. Here is the result."],
+                "agentic": ["Plan ready. Here is the status."],
+            },
+        }
+
+        path = self.project_root / "calcie_core" / "feedback_phrases.json"
+        try:
+            if not path.exists():
+                return fallback
+            with open(path, "r") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return fallback
+            ack = data.get("ack")
+            bridge = data.get("bridge")
+            if not isinstance(ack, dict) or not isinstance(bridge, dict):
+                return fallback
+            return data
+        except Exception:
+            return fallback
+
+    def _feedback_kind_for_request(
+        self,
+        user_input: str,
+        input_type: str,
+        route_guess: str,
+        profile_query: bool,
+        use_llm_web_grounding: bool,
+        direct_search_query: str,
+    ) -> str:
+        if input_type == "GREETING":
+            return "general"
+        if profile_query:
+            return "profile"
+        if route_guess in {"coding", "agentic", "app", "computer", "search"}:
+            return route_guess
+        if direct_search_query or use_llm_web_grounding:
+            return "search"
+        normalized = self._normalize_text(user_input)
+        if any(k in normalized for k in {"search", "news", "latest", "score", "ipl"}):
+            return "search"
+        return "general"
+
+    def _pick_feedback_phrase(self, bucket: str, kind: str) -> str:
+        section = self.feedback_phrases.get(bucket, {}) if isinstance(self.feedback_phrases, dict) else {}
+        choices = section.get(kind) or section.get("general") or []
+        if not isinstance(choices, list) or not choices:
+            return ""
+        cleaned = [str(c).strip() for c in choices if str(c).strip()]
+        if not cleaned:
+            return ""
+        return random.choice(cleaned)
+
+    def _cancel_pending_ack_speech(self):
+        with self._pending_ack_lock:
+            timer = self._pending_ack_timer
+            self._pending_ack_timer = None
+        if timer is not None:
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+
+    def _schedule_ack_speech(self, line: str):
+        text = (line or "").strip()
+        if not text:
+            return
+        if not self.feedback_speak or not self.feedback_ack_speak_enabled:
+            return
+
+        self._cancel_pending_ack_speech()
+
+        def _fire():
+            self.speak(text)
+            with self._pending_ack_lock:
+                self._pending_ack_timer = None
+
+        delay = max(0.0, float(self.feedback_ack_delay_s))
+        if delay <= 0.0:
+            _fire()
+            return
+        timer = threading.Timer(delay, _fire)
+        timer.daemon = True
+        with self._pending_ack_lock:
+            self._pending_ack_timer = timer
+        timer.start()
+
+    def _emit_processing_feedback(self, kind: str, user_input: str):
+        if not self.feedback_enabled:
+            return
+        if len((user_input or "").strip()) < self.feedback_min_chars:
+            return
+        line = self._pick_feedback_phrase("ack", kind)
+        if not line:
+            return
+        if self.feedback_print:
+            print(f"\033[90mCalcie:\033[0m {line}")
+        if kind in self.feedback_speak_kinds:
+            self._schedule_ack_speech(line)
+
+    def _speak_with_bridge(self, kind: str, text: str, preempt: bool = False):
+        if not text:
+            return
+        if preempt and self.feedback_preempt_on_result:
+            self._cancel_pending_ack_speech()
+            self._clear_speech_queue()
+        bridge = ""
+        if (
+            self.feedback_enabled
+            and self.feedback_speak
+            and kind in self.feedback_bridge_kinds
+            and kind not in {"greeting"}
+        ):
+            bridge = self._pick_feedback_phrase("bridge", kind) or ""
+
+        if bridge and self.feedback_bridge_inline:
+            self.speak(f"{bridge} {text}")
+            return
+        if bridge:
+            self.speak(bridge)
+        self.speak(text)
+
+    def _build_local_profile_answer(self) -> str:
+        points = []
+        profile = self.profile_data if isinstance(self.profile_data, dict) else {}
+
+        name = str(profile.get("name") or "").strip()
+        job = str(profile.get("job") or "").strip()
+        location = str(profile.get("location") or "").strip()
+        projects = profile.get("projects") if isinstance(profile.get("projects"), list) else []
+        goals = profile.get("goals") if isinstance(profile.get("goals"), list) else []
+        devices = profile.get("devices") if isinstance(profile.get("devices"), list) else []
+
+        if name:
+            points.append(f"Name: {name}.")
+        if job:
+            points.append(f"Current role: {job}.")
+        if location:
+            points.append(f"Location: {location}.")
+        if projects:
+            points.append(f"Projects: {', '.join(str(p) for p in projects[:3])}.")
+        if goals:
+            points.append(f"Goals: {', '.join(str(g) for g in goals[:3])}.")
+        if devices:
+            points.append(f"Devices: {', '.join(str(d) for d in devices[:3])}.")
+
+        fact_lines = [str(f).strip() for f in self.facts if str(f).strip()][:3]
+        if fact_lines:
+            points.append("Known facts: " + "; ".join(fact_lines) + ".")
+
+        if not points:
+            return ""
+        return "Here is what I know about you right now:\n- " + "\n- ".join(points[:7])
+
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
@@ -562,11 +744,28 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
             return default
         return max(min_value, min(max_value, value))
 
+    def _env_float(self, name: str, default: float, min_value: float, max_value: float) -> float:
+        raw = (os.environ.get(name) or "").strip()
+        if not raw:
+            return default
+        try:
+            value = float(raw)
+        except ValueError:
+            return default
+        return max(min_value, min(max_value, value))
+
     def _env_bool(self, name: str, default: bool) -> bool:
         raw = (os.environ.get(name) or "").strip().lower()
         if not raw:
             return default
         return raw in {"1", "true", "yes", "on"}
+
+    def _env_kind_set(self, name: str, default: set) -> set:
+        raw = (os.environ.get(name) or "").strip()
+        if not raw:
+            return set(default)
+        items = {part.strip().lower() for part in raw.split(",") if part.strip()}
+        return items if items else set(default)
 
     def _collect_llm_text(
         self,
@@ -606,6 +805,94 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
 
     def _handle_agentic_computer_use_command(self, user_input: str):
         return self.agentic_computer_use_skill.handle_command(user_input)
+
+    def _strict_route_flags(self, user_input: str):
+        raw = (user_input or "").strip()
+        if not raw:
+            return {
+                "coding": False,
+                "agentic": False,
+                "app": False,
+                "computer": False,
+                "search": False,
+            }
+
+        app_intent = (
+            self.app_skill._extract_play_command(raw) is not None
+            or self.app_skill._extract_open_target_in_app_command(raw) is not None
+            or self.app_skill.extract_open_app_command(raw) is not None
+        )
+        search_intent = self.searching_skill.is_search_intent(raw)
+        coding_intent = self._is_code_command(raw)
+        computer_intent = self.computer_skill._is_control_intent(raw)
+        agentic_intent = self.agentic_computer_use_skill._should_trigger(raw)
+        if agentic_intent and self.agentic_computer_use_skill.essential_only:
+            agentic_intent = self.agentic_computer_use_skill._is_essential_task(raw)
+
+        return {
+            "coding": bool(coding_intent),
+            "agentic": bool(agentic_intent),
+            "app": bool(app_intent),
+            "computer": bool(computer_intent),
+            "search": bool(search_intent),
+        }
+
+    def _execute_skill_route(self, route: str, user_input: str):
+        if route == "coding":
+            return self._handle_code_command(user_input)
+        if route == "agentic":
+            return self._handle_agentic_computer_use_command(user_input)
+        if route == "app":
+            return self.app_skill.handle_command(user_input)
+        if route == "computer":
+            return self._handle_computer_command(user_input)
+        if route == "search":
+            return self._handle_search_command(user_input)
+        return None, None
+
+    def _dispatch_skill_command(self, user_input: str):
+        strict_flags = self._strict_route_flags(user_input)
+        decision = self.command_arbiter.decide(user_input, strict_flags)
+        default_order = ["coding", "agentic", "app", "computer", "search"]
+        rewritten = (decision.rewritten_input or "").strip()
+        rewritten_changed = bool(rewritten and rewritten != (user_input or "").strip())
+
+        if decision.route in default_order:
+            route_order = [decision.route] + [r for r in default_order if r != decision.route]
+            for route in route_order:
+                route_input = rewritten if route == decision.route and rewritten_changed else user_input
+                response, speak = self._execute_skill_route(route, route_input)
+                if response is not None:
+                    if self.router_debug:
+                        print(
+                            f"\033[90m[router route={route} conf={decision.confidence:.2f} "
+                            f"reason={decision.reason} rewritten={'yes' if rewritten_changed else 'no'}]\033[0m"
+                        )
+                    return response, speak
+            return None, None
+
+        if rewritten_changed:
+            for route in default_order:
+                response, speak = self._execute_skill_route(route, rewritten)
+                if response is not None:
+                    if self.router_debug:
+                        print(
+                            f"\033[90m[router route={route} conf={decision.confidence:.2f} "
+                            f"reason={decision.reason} rewritten=yes]\033[0m"
+                        )
+                    return response, speak
+
+        for route in default_order:
+            response, speak = self._execute_skill_route(route, user_input)
+            if response is not None:
+                if self.router_debug:
+                    print(
+                        f"\033[90m[router route={route} conf={decision.confidence:.2f} "
+                        f"reason={decision.reason} rewritten=no]\033[0m"
+                    )
+                return response, speak
+
+        return None, None
 
     def _call_llm(
         self,
@@ -849,6 +1136,7 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
 
     def chat(self, user_input: str) -> str:
         """Process user input with streaming and parallel TTS."""
+        self._cancel_pending_ack_speech()
         routed_response, local_input = self._maybe_route_cross_device_command(user_input)
         if routed_response is not None:
             print(f"\033[94mCalcie:\033[0m {routed_response}")
@@ -864,52 +1152,45 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
         self.conversation_history.append({"role": "user", "content": user_input})
         self._save_to_db("user", user_input)
 
-        code_response, code_speak = self._handle_code_command(user_input)
-        if code_response is not None:
-            print(f"\033[94mCalcie:\033[0m {code_response}")
-            if code_speak:
-                self.speak(code_speak)
-            self.conversation_history.append({"role": "assistant", "content": code_response})
-            self._save_to_db("assistant", code_response)
-            return code_response
-
-        agentic_response, agentic_speak = self._handle_agentic_computer_use_command(user_input)
-        if agentic_response is not None:
-            print(f"\033[94mCalcie:\033[0m {agentic_response}")
-            if agentic_speak:
-                self.speak(agentic_speak)
-            self.conversation_history.append({"role": "assistant", "content": agentic_response})
-            self._save_to_db("assistant", agentic_response)
-            return agentic_response
-
-        app_response, app_speak = self.app_skill.handle_command(user_input)
-        if app_response is not None:
-            print(f"\033[94mCalcie:\033[0m {app_response}")
-            if app_speak:
-                self.speak(app_speak)
-            self.conversation_history.append({"role": "assistant", "content": app_response})
-            self._save_to_db("assistant", app_response)
-            return app_response
-
-        computer_response, computer_speak = self._handle_computer_command(user_input)
-        if computer_response is not None:
-            print(f"\033[94mCalcie:\033[0m {computer_response}")
-            if computer_speak:
-                self.speak(computer_speak)
-            self.conversation_history.append({"role": "assistant", "content": computer_response})
-            self._save_to_db("assistant", computer_response)
-            return computer_response
-
-        search_response, search_speak = self._handle_search_command(user_input)
-        if search_response is not None:
-            print(f"\033[94mCalcie:\033[0m {search_response}")
-            if search_speak:
-                self.speak(search_speak)
-            self.conversation_history.append({"role": "assistant", "content": search_response})
-            self._save_to_db("assistant", search_response)
-            return search_response
-
+        normalized_user_input = self._normalize_text(user_input)
+        profile_query = self._is_profile_query(normalized_user_input)
+        use_llm_web_grounding = self._should_use_llm_web_grounding(user_input)
         direct_search_query = self._extract_direct_search_query(user_input)
+        route_guess = self.command_arbiter.decide(
+            user_input,
+            self._strict_route_flags(user_input),
+        ).route or "general"
+        request_kind = self._feedback_kind_for_request(
+            user_input=user_input,
+            input_type=input_type,
+            route_guess=route_guess,
+            profile_query=profile_query,
+            use_llm_web_grounding=use_llm_web_grounding,
+            direct_search_query=direct_search_query,
+        )
+
+        if input_type != "GREETING":
+            self._emit_processing_feedback(request_kind, user_input)
+
+        skill_response, skill_speak = self._dispatch_skill_command(user_input)
+        if skill_response is not None:
+            print(f"\033[94mCalcie:\033[0m {skill_response}")
+            to_speak = skill_speak or skill_response
+            if to_speak:
+                self._speak_with_bridge(request_kind, to_speak, preempt=True)
+            self.conversation_history.append({"role": "assistant", "content": skill_response})
+            self._save_to_db("assistant", skill_response)
+            return skill_response
+
+        if profile_query:
+            local_profile_answer = self._build_local_profile_answer()
+            if local_profile_answer:
+                print(f"\033[94mCalcie:\033[0m {local_profile_answer}")
+                self._speak_with_bridge("profile", local_profile_answer, preempt=True)
+                self.conversation_history.append({"role": "assistant", "content": local_profile_answer})
+                self._save_to_db("assistant", local_profile_answer)
+                return local_profile_answer
+
         if self.use_external_web_tools and direct_search_query:
             print("\033[94mCalcie:\033[0m (Searching web...)")
             normalized_sports = self._normalize_text(f"{user_input} {direct_search_query}")
@@ -934,7 +1215,7 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
                         if refined_text and not refined_text.lower().startswith("latest update:"):
                             final_text = refined_text
             print(f"\033[94mCalcie:\033[0m {final_text}")
-            self.speak(final_text)
+            self._speak_with_bridge("search", final_text, preempt=True)
             self.conversation_history.append({"role": "assistant", "content": final_text})
             self._save_to_db("assistant", final_text)
             return final_text
@@ -947,10 +1228,26 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
             self._save_to_db("assistant", final_text)
             return final_text
 
-        normalized_user_input = self._normalize_text(user_input)
-        profile_query = self._is_profile_query(normalized_user_input)
-        use_llm_web_grounding = self._should_use_llm_web_grounding(user_input)
-        llm_messages = self._trim_messages_for_llm(self.conversation_history, use_llm_web_grounding)
+        history_limit = self._history_limit_for_request(
+            route_hint=route_guess,
+            web_grounded=use_llm_web_grounding,
+            profile_query=profile_query,
+        )
+        llm_history = self._trim_messages_for_llm(
+            self.conversation_history,
+            use_llm_web_grounding,
+            limit_override=history_limit,
+        )
+        llm_messages = [
+            {
+                "role": "system",
+                "content": self._system_prompt_for_request(
+                    route_hint=route_guess,
+                    web_grounded=use_llm_web_grounding,
+                    profile_query=profile_query,
+                ),
+            }
+        ] + llm_history
         if llm_messages and llm_messages[-1]["role"] == "user":
             if input_type == "QUERY" and not use_llm_web_grounding and self._needs_detailed_answer(normalized_user_input):
                 llm_messages[-1] = {
@@ -970,7 +1267,7 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
                 llm_messages[-1] = {
                     "role": "user",
                     "content": (
-                        f"{user_input}\n\nUse known context from system prompt and past chats. "
+                        f"{user_input}\n\nUse profile context when relevant. "
                         "Do not claim you have no personal info. Keep it to 6 short points."
                     ),
                 }
@@ -1015,7 +1312,7 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
             print("\033[94mCalcie:\033[0m (Searching web...)")
             search_result = self.web_search(query)
             final_text = f"Here's what I found: {search_result}"
-            self.speak(final_text)
+            self._speak_with_bridge("search", final_text, preempt=True)
             spoken = True
             print(f"\033[94mCalcie:\033[0m {final_text}")
 
@@ -1025,12 +1322,12 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
             app_name = open_match.group(1).strip()
             app_result = self.open_app(app_name)
             final_text = app_result
-            self.speak(final_text)
+            self._speak_with_bridge("app", final_text, preempt=True)
             spoken = True
             print(f"\033[94mCalcie:\033[0m {final_text}")
 
         if not spoken and final_text:
-            self.speak(final_text)
+            self._speak_with_bridge(request_kind, final_text, preempt=True)
 
         # Save to history
         self.conversation_history.append({"role": "assistant", "content": final_text})
@@ -1122,25 +1419,9 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
         _, local_text = self._extract_target_device_hint(text)
         text = local_text.strip() or text
 
-        code_response, _ = self._handle_code_command(text)
-        if code_response is not None:
-            return code_response
-
-        agentic_response, _ = self._handle_agentic_computer_use_command(text)
-        if agentic_response is not None:
-            return agentic_response
-
-        app_response, _ = self.app_skill.handle_command(text)
-        if app_response is not None:
-            return app_response
-
-        computer_response, _ = self._handle_computer_command(text)
-        if computer_response is not None:
-            return computer_response
-
-        search_response, _ = self._handle_search_command(text)
-        if search_response is not None:
-            return search_response
+        response, _ = self._dispatch_skill_command(text)
+        if response is not None:
+            return response
 
         return "Received command, but it requires interactive context. Open CALCIE chat and continue."
 
@@ -1238,6 +1519,94 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
             if self.speech_queue.empty():
                 self.is_speaking = False
 
+    def _clear_speech_queue(self):
+        """Drop queued (not-yet-spoken) TTS chunks to reduce stale speech lag."""
+        while True:
+            try:
+                _ = self.speech_queue.get_nowait()
+                self.speech_queue.task_done()
+            except queue.Empty:
+                break
+
+    def _tts_log(self, message: str):
+        if not self.tts_debug:
+            return
+        print(f"\033[90m[TTS] {message}\033[0m")
+
+    def _get_google_access_token(self) -> str:
+        # 1) Explicitly supplied token wins.
+        env_token = (os.environ.get("GOOGLE_OAUTH_ACCESS_TOKEN") or "").strip()
+        if env_token:
+            return env_token
+
+        # 2) ADC via gcloud for local development.
+        if not self.google_tts_use_adc:
+            return ""
+
+        now = time.time()
+        with self._google_access_token_lock:
+            cached = self._google_access_token_cache
+            expires_at = self._google_access_token_expires_at
+        if cached and now < (expires_at - 20):
+            return cached
+
+        try:
+            proc = subprocess.run(
+                ["gcloud", "auth", "application-default", "print-access-token"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+            )
+        except Exception as exc:
+            self._tts_log(f"google_tts ADC token fetch failed: {str(exc)[:180]}")
+            return ""
+
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()
+            if err:
+                self._tts_log(f"google_tts ADC token fetch failed: {err[:200]}")
+            return ""
+
+        token = (proc.stdout or "").strip()
+        if not token:
+            self._tts_log("google_tts ADC token fetch returned empty token")
+            return ""
+
+        with self._google_access_token_lock:
+            self._google_access_token_cache = token
+            self._google_access_token_expires_at = time.time() + float(self.google_tts_adc_ttl_s)
+        return token
+
+    def _get_google_quota_project(self) -> str:
+        direct = (
+            os.environ.get("CALCIE_GOOGLE_TTS_QUOTA_PROJECT")
+            or os.environ.get("GOOGLE_CLOUD_QUOTA_PROJECT")
+            or os.environ.get("GOOGLE_CLOUD_PROJECT")
+            or ""
+        ).strip()
+        if direct:
+            return direct
+
+        # Try ADC file written by: gcloud auth application-default login
+        adc_path = (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+        candidates = []
+        if adc_path:
+            candidates.append(Path(adc_path))
+        candidates.append(Path.home() / ".config" / "gcloud" / "application_default_credentials.json")
+
+        for path in candidates:
+            try:
+                if not path.exists():
+                    continue
+                with open(path, "r") as f:
+                    payload = json.load(f)
+                quota = str(payload.get("quota_project_id") or "").strip()
+                if quota:
+                    return quota
+            except Exception:
+                continue
+        return ""
+
     def wait_for_speech(self):
         """Block until all TTS generation and playback finishes."""
         self.speech_queue.join()
@@ -1263,58 +1632,305 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
         spoken = re.sub(r"[^\x00-\x7F]+", "", spoken).strip(" ,")
         return spoken
 
+    def _chunk_tts_text(self, text: str) -> list:
+        spoken = (text or "").strip()
+        if not spoken:
+            return []
+        max_chars = max(80, int(self.tts_chunk_chars))
+        if len(spoken) <= max_chars:
+            return [spoken]
+
+        chunks = []
+        sentence_parts = re.split(r"(?<=[.!?])\s+", spoken)
+        current = ""
+
+        for part in sentence_parts:
+            p = (part or "").strip()
+            if not p:
+                continue
+            if len(p) > max_chars:
+                words = p.split()
+                sub = ""
+                for w in words:
+                    candidate = f"{sub} {w}".strip()
+                    if len(candidate) <= max_chars:
+                        sub = candidate
+                    else:
+                        if sub:
+                            chunks.append(sub)
+                        sub = w
+                if sub:
+                    if current and len(f"{current} {sub}") <= max_chars:
+                        current = f"{current} {sub}".strip()
+                    else:
+                        if current:
+                            chunks.append(current)
+                        current = sub
+                continue
+
+            candidate = f"{current} {p}".strip() if current else p
+            if len(candidate) <= max_chars:
+                current = candidate
+            else:
+                if current:
+                    chunks.append(current)
+                current = p
+
+        if current:
+            chunks.append(current)
+        return chunks if chunks else [spoken]
+
     def speak(self, text: str):
         """Enqueue text for background TTS."""
         if not TTS_AVAILABLE:
             return
         spoken_text = self._sanitize_for_tts(text)
-        if spoken_text:
-            self.speech_queue.put(spoken_text)
+        if not spoken_text:
+            return
+        for chunk in self._chunk_tts_text(spoken_text):
+            self.speech_queue.put(chunk)
 
     def _speak_sync(self, text: str):
-        """Synchronously process edge-tts with correct OS fallbacks."""
+        """Synchronously process TTS with provider fallback."""
         import uuid
         import subprocess
         output_file = f"/tmp/calcie_speech_{uuid.uuid4().hex}.mp3"
         voice = os.environ.get("CALCIE_TTS_VOICE", "en-US-AvaNeural")
         rate = os.environ.get("CALCIE_TTS_RATE", "-1%")
         pitch = os.environ.get("CALCIE_TTS_PITCH", "-8Hz")
+        online = is_online()
+
+        def _play_audio_file(path: str) -> bool:
+            try:
+                if sys.platform == "darwin":
+                    subprocess.run(
+                        ["afplay", path],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    return True
+                if sys.platform == "linux":
+                    lower = path.lower()
+                    if lower.endswith(".wav"):
+                        subprocess.run(
+                            ["aplay", "-q", path],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                    else:
+                        subprocess.run(
+                            ["mpg123", path],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                    return True
+                subprocess.run(
+                    ["cmd", "/c", "start", "", path],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return True
+            except Exception:
+                return False
+
+        def _run_google_tts() -> bool:
+            quota_project = self._get_google_quota_project()
+
+            if self.google_tts_disabled:
+                # Auto-recover if quota project is now configured after a prior 403.
+                if (
+                    quota_project
+                    and "quota project" in (self.google_tts_disable_reason or "").lower()
+                ):
+                    self.google_tts_disabled = False
+                    self.google_tts_disable_reason = ""
+                    self.google_tts_disable_logged = False
+                    self._tts_log(f"google_tts re-enabled with quota project: {quota_project}")
+                elif "oauth2" in (self.google_tts_disable_reason or "").lower():
+                    oauth_probe = self._get_google_access_token()
+                    if oauth_probe:
+                        self.google_tts_disabled = False
+                        self.google_tts_disable_reason = ""
+                        self.google_tts_disable_logged = False
+                        self._tts_log("google_tts re-enabled with OAuth token")
+
+                if not self.google_tts_disable_logged:
+                    self._tts_log(f"google_tts disabled: {self.google_tts_disable_reason or 'unknown reason'}")
+                    self.google_tts_disable_logged = True
+                if self.google_tts_disabled:
+                    return False
+
+            api_key = (
+                os.environ.get("GOOGLE_AI_API_KEY")
+                or os.environ.get("UOGLE_AI_API_KEY")
+                or ""
+            ).strip()
+            oauth_token = self._get_google_access_token()
+
+            if not online:
+                self._tts_log("google_tts skipped: offline")
+                return False
+
+            if not oauth_token and not api_key:
+                self._tts_log("google_tts skipped: missing GOOGLE_OAUTH_ACCESS_TOKEN / GOOGLE_AI_API_KEY")
+                return False
+
+            endpoint = (
+                os.environ.get("CALCIE_GOOGLE_TTS_ENDPOINT")
+                or "https://texttospeech.googleapis.com/v1beta1/text:synthesize"
+            ).strip()
+            model_name = (os.environ.get("CALCIE_GOOGLE_TTS_MODEL") or "").strip()
+            voice_name = (os.environ.get("CALCIE_GOOGLE_TTS_VOICE_NAME") or "Leda").strip()
+            language_code = (os.environ.get("CALCIE_GOOGLE_TTS_LANGUAGE_CODE") or "en-IN").strip()
+            prompt = (
+                os.environ.get("CALCIE_GOOGLE_TTS_PROMPT")
+                or "Read aloud in a warm, welcoming tone."
+            ).strip()
+            audio_encoding = (os.environ.get("CALCIE_GOOGLE_TTS_AUDIO_ENCODING") or "LINEAR16").strip().upper()
+
+            try:
+                speaking_rate = float(os.environ.get("CALCIE_GOOGLE_TTS_SPEAKING_RATE", "0.92"))
+            except ValueError:
+                speaking_rate = 0.92
+            try:
+                pitch_value = float(os.environ.get("CALCIE_GOOGLE_TTS_PITCH", "0"))
+            except ValueError:
+                pitch_value = 0.0
+
+            request_body = {
+                "audioConfig": {
+                    "audioEncoding": audio_encoding,
+                    "pitch": pitch_value,
+                    "speakingRate": speaking_rate,
+                },
+                "input": {
+                    "text": text,
+                },
+                "voice": {
+                    "languageCode": language_code,
+                    "name": voice_name,
+                },
+            }
+            if model_name:
+                request_body["voice"]["modelName"] = model_name
+            model_name_lower = model_name.lower()
+            voice_name_lower = voice_name.lower()
+            is_gemini_tts = "gemini" in model_name_lower
+            is_chirp_voice = "chirp" in voice_name_lower
+
+            # `input.prompt` is only accepted by Gemini TTS models.
+            if prompt and is_gemini_tts and not is_chirp_voice:
+                request_body["input"]["prompt"] = prompt
+
+            using_api_key = False
+            headers = {"Content-Type": "application/json"}
+            url = endpoint
+
+            if oauth_token:
+                headers["Authorization"] = f"Bearer {oauth_token}"
+            else:
+                joiner = "&" if "?" in endpoint else "?"
+                url = f"{endpoint}{joiner}key={urllib.parse.quote_plus(api_key)}"
+                headers["x-goog-api-key"] = api_key
+                headers["X-Goog-Api-Key"] = api_key
+                using_api_key = True
+            if quota_project:
+                headers["X-Goog-User-Project"] = quota_project
+
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(request_body).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+
+            tmp_ext = ".wav" if audio_encoding == "LINEAR16" else ".mp3"
+            tmp_file = f"/tmp/calcie_speech_{uuid.uuid4().hex}{tmp_ext}"
+            try:
+                with urllib.request.urlopen(req, timeout=20) as response:
+                    payload = json.loads(response.read().decode("utf-8", errors="replace"))
+                audio_b64 = str(payload.get("audioContent") or "").strip()
+                if not audio_b64:
+                    self._tts_log("google_tts failed: empty audioContent")
+                    return False
+                audio_bytes = base64.b64decode(audio_b64)
+                with open(tmp_file, "wb") as f:
+                    f.write(audio_bytes)
+                played = _play_audio_file(tmp_file)
+                if not played:
+                    self._tts_log("google_tts failed: audio playback failed")
+                return played
+            except urllib.error.HTTPError as exc:
+                err_body = ""
+                try:
+                    err_body = exc.read().decode("utf-8", errors="replace")
+                except Exception:
+                    err_body = str(exc)
+                lowered = (err_body or "").lower()
+                if using_api_key and "api keys are not supported" in lowered:
+                    self.google_tts_disabled = True
+                    self.google_tts_disable_logged = False
+                    self.google_tts_disable_reason = (
+                        "endpoint requires OAuth2; set GOOGLE_OAUTH_ACCESS_TOKEN or switch CALCIE_TTS_PROVIDER=edge"
+                    )
+                if "requires a quota project" in lowered:
+                    self.google_tts_disable_logged = False
+                    self.google_tts_disabled = True
+                    self.google_tts_disable_reason = (
+                        "missing quota project; run gcloud auth application-default set-quota-project <PROJECT_ID> "
+                        "or set CALCIE_GOOGLE_TTS_QUOTA_PROJECT"
+                    )
+                self._tts_log(
+                    f"google_tts HTTP {getattr(exc, 'code', 'error')}: "
+                    f"{(err_body or str(exc))[:220]}"
+                )
+                return False
+            except Exception as exc:
+                self._tts_log(f"google_tts exception: {str(exc)[:220]}")
+                return False
+            finally:
+                try:
+                    if os.path.exists(tmp_file):
+                        os.remove(tmp_file)
+                except Exception:
+                    pass
 
         async def _run_edge():
             try:
+                if not online:
+                    return False
                 communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
                 await communicate.save(output_file)
-                if sys.platform == "darwin":
-                    subprocess.run(
-                        ["afplay", output_file],
-                        check=False,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                elif sys.platform == "linux":
-                    subprocess.run(
-                        ["mpg123", output_file],
-                        check=False,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                else:
-                    subprocess.run(
-                        ["cmd", "/c", "start", "", output_file],
-                        check=False,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
+                played = _play_audio_file(output_file)
                     
                 try: os.remove(output_file) 
                 except: pass
                 
-                return True
+                return played
             except:
                 return False
 
-        success = asyncio.run(_run_edge())
-        if not success:
+        provider_used = "none"
+        mode = self.tts_provider_mode
+        success = False
+
+        if mode in {"auto", "google"}:
+            success = _run_google_tts()
+            if success:
+                provider_used = "google_tts"
+
+        if not success and mode in {"auto", "edge"}:
+            success = asyncio.run(_run_edge())
+            if success:
+                provider_used = "edge_tts"
+            else:
+                self._tts_log("edge_tts failed")
+
+        if not success and mode in {"auto", "offline"}:
             try:
                 script = (
                     f"import pyttsx3; "
@@ -1329,8 +1945,14 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
-            except:
-                pass
+                provider_used = "pyttsx3"
+                success = True
+            except Exception as exc:
+                self._tts_log(f"pyttsx3 failed: {str(exc)[:220]}")
+
+        if not success and provider_used == "none":
+            provider_used = f"none(mode={mode})"
+        self._tts_log(f"provider={provider_used} chars={len(text or '')}")
 
     def _normalize_text(self, text: str) -> str:
         return core_normalize_text(text)
@@ -1709,11 +2331,49 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
         ]
         return any(marker in normalized for marker in web_markers)
 
-    def _trim_messages_for_llm(self, messages: list, web_grounded: bool = False) -> list:
+    def _history_limit_for_request(
+        self,
+        route_hint: str,
+        web_grounded: bool,
+        profile_query: bool,
+    ) -> int:
+        if profile_query:
+            return min(self.max_context_messages, 4)
+        if web_grounded:
+            return min(self.max_context_messages_web, 3)
+        if route_hint == "coding":
+            return min(self.max_context_messages, 5)
+        if route_hint in {"search", "app", "computer", "agentic"}:
+            return min(self.max_context_messages, 4)
+        return min(self.max_context_messages, 6)
+
+    def _system_prompt_for_request(
+        self,
+        route_hint: str,
+        web_grounded: bool,
+        profile_query: bool,
+    ) -> str:
+        if profile_query:
+            profile_blob = build_profile_context(self.profile_data, self.facts, max_facts=14)
+            if profile_blob:
+                return f"{PROFILE_CHAT_PROMPT}\n\n{profile_blob}"
+            return PROFILE_CHAT_PROMPT
+        if web_grounded or route_hint == "search":
+            return WEB_GROUNDED_CHAT_PROMPT
+        return GENERAL_CHAT_PROMPT
+
+    def _trim_messages_for_llm(
+        self,
+        messages: list,
+        web_grounded: bool = False,
+        limit_override: int = None,
+    ) -> list:
         if not messages:
             return []
 
-        limit = self.max_context_messages_web if web_grounded else self.max_context_messages
+        limit = limit_override if limit_override is not None else (
+            self.max_context_messages_web if web_grounded else self.max_context_messages
+        )
         system_msg = None
         non_system = []
         for m in messages:
@@ -1786,10 +2446,8 @@ You are CALCIE. Not a tool. Not a coach. A friend who happens to be really usefu
                     self._stderr_devnull_fd = None
 
     def clear_history(self):
-        """Clear conversation history (keeps system prompt)."""
-        self.conversation_history = [
-            {"role": "system", "content": self.SYSTEM_PROMPT}
-        ]
+        """Clear conversation history."""
+        self.conversation_history = []
 
     def listen_for_wake_or_text(self) -> tuple:
         """Continuously listen for wake word or wait for text from the queue."""
