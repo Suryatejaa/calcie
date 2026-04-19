@@ -7,6 +7,7 @@ This directory contains task-specific skills used by `calcie.py`.
 - `agentic_computer_use.py`: essential-task multi-step planner that cross-uses app/search/computer skills.
 - `coding.py`: codebase read/search/explain + guarded proposal/apply workflow.
 - `computer_control.py`: local desktop controls (screenshot/click/scroll/type/keys) with arm-lock safety.
+- `screen_vision.py`: continuous screen monitoring loop with multimodal vision analysis and alerts.
 - `searching.py`: provider-backed web search (Tavily/Exa), page scraping, and LLM synthesis.
 
 Detailed docs:
@@ -14,6 +15,7 @@ Detailed docs:
 - [Agentic Computer Use Skill](./docs/agentic_computer_use.md)
 - [Coding Skill](./docs/coding.md)
 - [Computer Control Skill](./docs/computer_control.md)
+- [Screen Vision Skill](./docs/screen_vision.md)
 - [Searching Skill](./docs/searching.md)
 
 ## Skill contract

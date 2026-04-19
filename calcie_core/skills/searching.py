@@ -2,14 +2,23 @@
 
 import json
 import os
+import pathlib
 import re
+import shutil
+import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from html import unescape
 from typing import Callable, Dict, List, Optional, Tuple
 
-from calcie_core.prompts import SEARCH_SYNTH_SYSTEM_PROMPT, SEARCH_SYNTH_USER_TEMPLATE
+from calcie_core.prompts import (
+    SEARCH_SYNTH_SYSTEM_PROMPT,
+    SEARCH_SYNTH_USER_TEMPLATE,
+    SPORTS_MCP_INTERPRET_SYSTEM_PROMPT,
+    WEATHER_GROUNDED_SYSTEM_PROMPT,
+)
 
 try:
     from tavily import TavilyClient  # type: ignore
@@ -34,13 +43,22 @@ class SearchingSkill:
         fallback_search: Optional[Callable[[str], str]] = None,
         max_results: int = 5,
         max_source_chars: int = 5000,
+        app_skill=None,
+        project_root: Optional[pathlib.Path] = None,
     ):
         self.llm_collect_text = llm_collect_text
         self.fallback_search = fallback_search
+        self.app_skill = app_skill
+        self.project_root = pathlib.Path(project_root or pathlib.Path.cwd()).resolve()
         self.max_results = max(3, min(8, int(max_results)))
         self.max_source_chars = max(1500, int(max_source_chars))
         self.tavily_api_key = (os.environ.get("TAVILY_API_KEY") or "").strip()
         self.exa_api_key = (os.environ.get("EXA_API_KEY") or "").strip()
+        self.weather_api_key = (os.environ.get("WEATHER_API_KEY") or "").strip()
+        self.weather_llm_provider = (os.environ.get("CALCIE_WEATHER_LLM_PROVIDER") or "gemini").strip().lower()
+        self.rapidapi_key = (os.environ.get("RAPIDAPI_KEY") or "").strip()
+        self.apify_api_key = (os.environ.get("APIFY_API") or "").strip()
+        self.apify_actor_id = (os.environ.get("APIFY_ID") or "").strip()
         self.search_provider = (os.environ.get("CALCIE_SEARCH_PROVIDER") or "auto").strip().lower()
         self.allow_fallback = (os.environ.get("CALCIE_SEARCH_ALLOW_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"})
         self.research_timeout_s = max(8, min(60, int(os.environ.get("CALCIE_RESEARCH_TIMEOUT_S", "24"))))
@@ -54,6 +72,16 @@ class SearchingSkill:
         self.synth_tokens = max(120, min(480, int(os.environ.get("CALCIE_SEARCH_SYNTH_TOKENS", "220"))))
         self.search_llm_provider = (os.environ.get("CALCIE_SEARCH_LLM_PROVIDER") or "auto").strip().lower()
         self.ddgs_fallback_results = max(3, min(8, int(os.environ.get("CALCIE_DDGS_FALLBACK_RESULTS", "5"))))
+        self.jobs_max_results = max(3, min(10, int(os.environ.get("CALCIE_JOBS_MAX_RESULTS", "6"))))
+        self.job_hunter_enabled = (os.environ.get("CALCIE_JOB_HUNTER_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"})
+        self.job_hunter_port = max(1024, min(65535, int(os.environ.get("CALCIE_JOB_HUNTER_PORT", "3000"))))
+        self.job_hunter_browser = (os.environ.get("CALCIE_JOB_HUNTER_BROWSER") or "chrome").strip() or "chrome"
+        self.job_hunter_autorun = (os.environ.get("CALCIE_JOB_HUNTER_AUTORUN", "1").strip().lower() in {"1", "true", "yes", "on"})
+        self.sports_mcp_enabled = (os.environ.get("CALCIE_SPORTS_MCP_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"})
+        self.sports_mcp_base_url = (os.environ.get("CALCIE_SPORTS_MCP_URL") or "https://mrbridge--espn-mcp-server.apify.actor/mcp").strip()
+        self.sports_mcp_timeout_s = max(5, min(20, int(os.environ.get("CALCIE_SPORTS_MCP_TIMEOUT_S", "10"))))
+        self.weather_api_url = (os.environ.get("CALCIE_WEATHER_API_URL") or "https://api.weatherapi.com/v1/current.json").strip()
+        self.weather_default_query = (os.environ.get("CALCIE_WEATHER_DEFAULT_QUERY") or "auto:ip").strip() or "auto:ip"
         self.show_sources = (os.environ.get("CALCIE_SEARCH_SHOW_SOURCES", "1").strip().lower() in {"1", "true", "yes", "on"})
         self.debug_output = (os.environ.get("CALCIE_SEARCH_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"})
         self._tavily_client = TavilyClient(api_key=self.tavily_api_key) if TavilyClient and self.tavily_api_key else None
@@ -63,11 +91,17 @@ class SearchingSkill:
         normalized = self._normalize(user_input)
         if not normalized:
             return False
-        if re.match(r"^(search|web search|lookup|look up|find)\b", normalized):
+        if re.match(r"^(search|web search|lookup|look up|find|check)\b", normalized):
+            return True
+        if self._is_job_query(normalized):
             return True
         if "latest" in normalized and "news" in normalized:
             return True
         if normalized in {"news", "latest news", "today news", "headlines"}:
+            return True
+        if self._is_weather_query(normalized):
+            return True
+        if normalized.startswith("check ") and re.search(r"\b(ipl|score|match|won|news|price|weather|result|points|table)\b", normalized):
             return True
         if any(k in normalized for k in {"latest", "today", "yesterday", "last night", "current", "now"}):
             if re.search(r"\b(ipl|score|match|won|news|price|weather|result)\b", normalized):
@@ -84,7 +118,7 @@ class SearchingSkill:
             return "latest world news"
 
         match = re.match(
-            r"^\s*(?:search|web search|lookup|look up|find)\s*[,:\-]?\s*(.+)$",
+            r"^\s*(?:search|web search|lookup|look up|find|check)\s*[,:\-]?\s*(.+)$",
             raw,
             flags=re.IGNORECASE,
         )
@@ -97,6 +131,18 @@ class SearchingSkill:
             return None, None
 
         query = self.extract_query(user_input)
+        normalized_query = self._normalize(query)
+        if self._is_weather_query(normalized_query):
+            response, spoken = self._handle_weather_query(query)
+            if response:
+                return response, spoken
+        if self._is_sports_query(normalized_query) and not self._is_unsupported_espn_sport(normalized_query):
+            response, spoken = self._handle_sports_query(query)
+            if response:
+                return response, spoken
+        if self._is_job_query(normalized_query):
+            response, spoken = self._handle_jobs_query(query)
+            return response, spoken
         query_for_provider = self._prepare_provider_query(query)
         results, provider_used, attempted = self._search(query_for_provider)
 
@@ -127,6 +173,402 @@ class SearchingSkill:
                 + f"\n\n[debug] provider={provider_used} | attempts={' | '.join(attempted)}"
             )
         return response, summary
+
+    def _handle_sports_query(self, query: str) -> Tuple[Optional[str], Optional[str]]:
+        if not self.sports_mcp_enabled or not self.apify_api_key:
+            return None, None
+
+        tool_name, tool_args, reason = self._infer_sports_tool_call(query)
+        text, err = self._call_sports_mcp_tool(tool_name, tool_args)
+        if err or not text:
+            if self.debug_output and err:
+                return None, None
+            return None, None
+
+        response = text.strip()
+        if self.debug_output:
+            response += f"\n\n[debug] provider=espn_mcp | tool={tool_name} | reason={reason}"
+        return response, "I checked the sports data."
+
+    def _handle_weather_query(self, query: str) -> Tuple[Optional[str], Optional[str]]:
+        location_query = self._extract_weather_location(query)
+        if not self.weather_api_key:
+            fallback = self._handle_weather_query_llm(query, location_query, "weather_api_not_configured")
+            if fallback[0]:
+                return fallback
+            return "Weather API is not configured. Set WEATHER_API_KEY to enable direct weather lookups.", "Weather API is not configured."
+
+        url = (
+            f"{self.weather_api_url}?key={urllib.parse.quote_plus(self.weather_api_key)}"
+            f"&q={urllib.parse.quote_plus(location_query)}&aqi=no"
+        )
+        body, err = self._get_json(url, timeout=max(self.search_http_timeout_s, 12))
+        if body is None:
+            api_message = self._extract_api_error_from_text(err or "")
+            if api_message:
+                fallback = self._handle_weather_query_llm(query, location_query, api_message)
+                if fallback[0]:
+                    return fallback
+                return f"Weather lookup failed: {api_message}", "Weather lookup failed."
+            fallback = self._handle_weather_query_llm(query, location_query, err or "weather_service_unreachable")
+            if fallback[0]:
+                return fallback
+            return (
+                f"I could not reach the weather service right now. Error: {err or 'unknown error'}",
+                "I could not reach the weather service right now.",
+            )
+
+        api_err = self._extract_api_error(body)
+        if api_err:
+            fallback = self._handle_weather_query_llm(query, location_query, api_err)
+            if fallback[0]:
+                return fallback
+            return f"Weather lookup failed: {api_err}", "Weather lookup failed."
+
+        location_data = body.get("location") if isinstance(body, dict) else {}
+        current = body.get("current") if isinstance(body, dict) else {}
+        if not isinstance(location_data, dict) or not isinstance(current, dict):
+            return "Weather lookup returned an incomplete result.", "Weather lookup returned an incomplete result."
+
+        place_parts = [
+            str(location_data.get("name") or "").strip(),
+            str(location_data.get("region") or "").strip(),
+            str(location_data.get("country") or "").strip(),
+        ]
+        place = ", ".join(part for part in place_parts if part)
+        if not place:
+            place = "your location" if location_query == "auto:ip" else location_query
+
+        condition = ""
+        condition_data = current.get("condition")
+        if isinstance(condition_data, dict):
+            condition = str(condition_data.get("text") or "").strip()
+
+        temp_c = current.get("temp_c")
+        feels_c = current.get("feelslike_c")
+        humidity = current.get("humidity")
+        wind_kph = current.get("wind_kph")
+        local_time = str(location_data.get("localtime") or "").strip()
+
+        details: List[str] = []
+        if temp_c not in (None, ""):
+            details.append(f"{temp_c}°C")
+        if condition:
+            details.append(condition)
+
+        extras: List[str] = []
+        if feels_c not in (None, ""):
+            extras.append(f"feels like {feels_c}°C")
+        if humidity not in (None, ""):
+            extras.append(f"humidity {humidity}%")
+        if wind_kph not in (None, ""):
+            extras.append(f"wind {wind_kph} kph")
+        if local_time:
+            extras.append(f"local time {local_time}")
+
+        response = f"Current weather for {place}: " + ", ".join(details or ["details unavailable"]) + "."
+        if extras:
+            response += " " + ". ".join(part.capitalize() for part in extras) + "."
+        if self.debug_output:
+            response += "\n\n[debug] provider=weatherapi | location_query=" + location_query
+
+        spoken_bits = [f"In {place}, "]
+        if temp_c not in (None, ""):
+            spoken_bits.append(f"it is {temp_c} degrees")
+        if feels_c not in (None, ""):
+            try:
+                if temp_c in (None, "") or abs(float(feels_c) - float(temp_c)) >= 1.0:
+                    spoken_bits.append(f", feels like {feels_c}")
+            except Exception:
+                spoken_bits.append(f", feels like {feels_c}")
+        if condition:
+            if temp_c not in (None, ""):
+                spoken_bits.append(f"and {condition.lower()}")
+            else:
+                spoken_bits.append(condition)
+        spoken = "".join(spoken_bits).strip() or "Here is the current weather."
+        return response, spoken
+
+    def _handle_weather_query_llm(self, query: str, location_query: str, fallback_reason: str) -> Tuple[Optional[str], Optional[str]]:
+        provider = self.weather_llm_provider or "gemini"
+        messages = [
+            {"role": "system", "content": WEATHER_GROUNDED_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"User request: {query}\n"
+                    f"Default location: {location_query}\n"
+                    f"Fallback reason: {fallback_reason}\n\n"
+                    "Use current grounded web information. If the user did not explicitly name a city, use the default location. "
+                    "Respond in 2 to 4 short sentences."
+                ),
+            },
+        ]
+        try:
+            response = self.llm_collect_text(
+                messages,
+                max_output_tokens=180,
+                forced_provider=provider,
+                enable_web_grounding=True,
+            ).strip()
+        except TypeError:
+            try:
+                response = self.llm_collect_text(
+                    messages,
+                    max_output_tokens=180,
+                    forced_provider=provider,
+                ).strip()
+            except Exception:
+                return None, None
+        except Exception:
+            return None, None
+
+        if not response or "model error" in response.lower():
+            return None, None
+        spoken = response.split("\n", 1)[0].strip()
+        return response, spoken
+
+    def _handle_jobs_query(self, query: str) -> Tuple[str, str]:
+        if self.job_hunter_enabled and self.app_skill:
+            launched = self._launch_job_hunter(query)
+            if launched:
+                message = "Opened Job Hunter for this search. Results will load in the browser."
+                return message, "Opening Job Hunter now."
+
+        jobs, provider_used, attempts = self._search_jobs(query)
+        if not jobs:
+            role = self._normalize_jobs_query(query)
+            fallback_query = f"{role} jobs site:linkedin.com/jobs OR site:indeed.com OR site:wellfound.com OR site:glassdoor.com"
+            results, provider_used, attempts2 = self._search(fallback_query)
+            attempts.extend(attempts2)
+            listing_summary = self._summarize_job_links(query, results, attempts, provider_used)
+            if listing_summary:
+                return listing_summary, "Live jobs providers were unavailable, so I found job board links instead."
+            return "I could not find live job listings for that role right now.", "I could not find live job listings right now."
+
+        summary = self._summarize_jobs(query, jobs)
+        response = summary
+        if self.show_sources:
+            lines = []
+            for job in jobs[: self.jobs_max_results]:
+                title = job.get("title") or "Untitled role"
+                company = job.get("company") or "Unknown company"
+                location = job.get("location") or "Location not listed"
+                url = job.get("url") or ""
+                lines.append(f"- {title} — {company} — {location} ({url})")
+            response += "\n\nSources:\n" + "\n".join(lines)
+        if self.debug_output:
+            response += f"\n\n[debug] provider={provider_used} | attempts={' | '.join(attempts)}"
+        return response, "I found live job listings for that role."
+
+    def _infer_sports_tool_call(self, query: str) -> Tuple[str, Dict[str, str], str]:
+        normalized = self._normalize(query)
+        heuristic = self._heuristic_sports_tool_call(query)
+        messages = [
+            {"role": "system", "content": SPORTS_MCP_INTERPRET_SYSTEM_PROMPT},
+            {"role": "user", "content": query},
+        ]
+        try:
+            raw = self.llm_collect_text(messages, max_output_tokens=220)
+            parsed = self._extract_json_object(raw)
+            if isinstance(parsed, dict):
+                tool = str(parsed.get("tool") or heuristic[0]).strip() or heuristic[0]
+                sport = str(parsed.get("sport") or "").strip()
+                league = str(parsed.get("league") or "").strip()
+                clean_query = str(parsed.get("query") or "").strip() or heuristic[1].get("query") or query
+                args: Dict[str, str] = {}
+                if sport:
+                    args["sport"] = sport
+                if league:
+                    args["league"] = league
+                if clean_query:
+                    args["query"] = clean_query
+                return tool, self._sanitize_sports_tool_args(tool, args, query), str(parsed.get("reason") or "llm")
+        except Exception:
+            pass
+        return heuristic
+
+    def _heuristic_sports_tool_call(self, query: str) -> Tuple[str, Dict[str, str], str]:
+        normalized = self._normalize(query)
+        sport, league = self._infer_sport_league(normalized)
+        args: Dict[str, str] = {}
+        if sport:
+            args["sport"] = sport
+        if league:
+            args["league"] = league
+
+        if any(term in normalized for term in ["standings", "points table", "table"]):
+            return "espn_standings", self._sanitize_sports_tool_args("espn_standings", args, query), "standings_keywords"
+        if any(term in normalized for term in ["ranking", "rankings"]):
+            return "espn_rankings", self._sanitize_sports_tool_args("espn_rankings", args, query), "rankings_keywords"
+        if any(term in normalized for term in ["news", "headlines", "headline"]):
+            return "espn_news", self._sanitize_sports_tool_args("espn_news", args, query), "news_keywords"
+        if any(term in normalized for term in ["live", "score", "scores", "won", "last night", "today", "tonight", "scoreboard", "result", "results"]):
+            tool = "espn_live_scoreboard" if "live" in normalized or "now" in normalized or "tonight" in normalized else "espn_scoreboard"
+            return tool, self._sanitize_sports_tool_args(tool, args, query), "score_keywords"
+
+        args["query"] = self._clean_sports_query(query)
+        return "espn_search", self._sanitize_sports_tool_args("espn_search", args, query), "fallback_search"
+
+    def _sanitize_sports_tool_args(self, tool: str, args: Dict[str, str], query: str) -> Dict[str, str]:
+        out = {k: v for k, v in args.items() if v}
+        if tool in {"espn_scoreboard", "espn_live_scoreboard", "espn_standings", "espn_rankings", "espn_news"}:
+            out.pop("query", None)
+        if tool == "espn_search" and not out.get("query"):
+            out["query"] = self._clean_sports_query(query)
+        return out
+
+    def _call_sports_mcp_tool(self, tool_name: str, args: Dict[str, str]) -> Tuple[str, str]:
+        if not self.sports_mcp_base_url or not self.apify_api_key:
+            return "", "missing_config"
+
+        endpoint = self.sports_mcp_base_url
+        if "token=" not in endpoint:
+            joiner = "&" if "?" in endpoint else "?"
+            endpoint = f"{endpoint}{joiner}token={urllib.parse.quote_plus(self.apify_api_key)}"
+
+        init_payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "CALCIE", "version": "1.0"},
+            },
+        }
+        self._post_json(
+            endpoint,
+            init_payload,
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "MCP-Protocol-Version": "2025-03-26",
+            },
+            timeout=self.sports_mcp_timeout_s,
+        )
+
+        call_payload = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": args,
+            },
+        }
+        body, err = self._post_json(
+            endpoint,
+            call_payload,
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "MCP-Protocol-Version": "2025-03-26",
+            },
+            timeout=self.sports_mcp_timeout_s,
+        )
+        if body is None:
+            return "", err or "mcp_http_error"
+        if isinstance(body, dict) and body.get("error"):
+            return "", self._extract_api_error(body) or str(body.get("error"))
+        result = body.get("result") if isinstance(body, dict) else None
+        content = result.get("content") if isinstance(result, dict) else None
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text")
+                    if text:
+                        parts.append(str(text).strip())
+            if parts:
+                return "\n\n".join(parts).strip(), ""
+        if isinstance(result, dict):
+            text = result.get("text") or result.get("content")
+            if isinstance(text, str) and text.strip():
+                return text.strip(), ""
+        return "", "empty_mcp_result"
+
+    def _launch_job_hunter(self, query: str) -> bool:
+        server_js = self.project_root / "job-hunter" / "server.js"
+        index_html = self.project_root / "job-hunter" / "index.html"
+        if not server_js.exists() or not index_html.exists():
+            return False
+        if not self._ensure_job_hunter_server_running(server_js):
+            return False
+
+        params = self._extract_job_hunter_query_params(query)
+        params["autorun"] = "1" if self.job_hunter_autorun else "0"
+        target = f"http://127.0.0.1:{self.job_hunter_port}/?{urllib.parse.urlencode(params)}"
+        try:
+            response = self.app_skill.open_target_in_app(target, self.job_hunter_browser)
+        except Exception:
+            return False
+        lowered = (response or "").lower()
+        return bool(response) and not lowered.startswith("failed")
+
+    def _ensure_job_hunter_server_running(self, server_js: pathlib.Path) -> bool:
+        if self._is_job_hunter_alive():
+            return True
+
+        node_bin = self._find_node_binary()
+        if not node_bin:
+            return False
+
+        runtime_dir = self.project_root / ".calcie" / "runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        log_path = runtime_dir / "job-hunter.log"
+        env = os.environ.copy()
+        env["PORT"] = str(self.job_hunter_port)
+
+        with open(log_path, "ab") as log_file:
+            subprocess.Popen(
+                [node_bin, str(server_js)],
+                cwd=str(server_js.parent),
+                env=env,
+                stdout=log_file,
+                stderr=log_file,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+
+        deadline = time.time() + 8.0
+        while time.time() < deadline:
+            if self._is_job_hunter_alive():
+                return True
+            time.sleep(0.4)
+        return False
+
+    def _is_job_hunter_alive(self) -> bool:
+        url = f"http://127.0.0.1:{self.job_hunter_port}/"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "CALCIE/1.0"})
+            with urllib.request.urlopen(req, timeout=1.5) as res:
+                return 200 <= getattr(res, "status", 200) < 500
+        except Exception:
+            return False
+
+    def _find_node_binary(self) -> str:
+        for candidate in ("node", "/opt/homebrew/bin/node", "/usr/local/bin/node"):
+            if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+            resolved = shutil.which(candidate) if "/" not in candidate else None
+            if resolved:
+                return resolved
+        return ""
+
+    def _extract_job_hunter_query_params(self, query: str) -> Dict[str, str]:
+        raw = (query or "").strip()
+        location = ""
+        role = raw
+        location_match = re.search(r"\b(?:in|at|for)\s+([a-zA-Z ,.-]{2,})$", raw, flags=re.IGNORECASE)
+        if location_match:
+            location = location_match.group(1).strip(" ,.-")
+            role = raw[: location_match.start()].strip(" ,.-")
+        role = self._normalize_jobs_query(role or raw) or raw
+        params = {"q": role}
+        if location:
+            params["location"] = location
+        if re.search(r"\bremote\b", raw, flags=re.IGNORECASE):
+            params["remote"] = "1"
+        return params
 
     def _search(self, query: str) -> Tuple[List[Dict[str, str]], str, List[str]]:
         provider = self.search_provider
@@ -169,6 +611,71 @@ class SearchingSkill:
                     return results, "ddgs", attempts
                 attempts.append(f"ddgs:{reason}")
         return [], "none", attempts
+
+    def _search_jobs(self, query: str) -> Tuple[List[Dict[str, str]], str, List[str]]:
+        attempts: List[str] = []
+        normalized_query = self._normalize_jobs_query(query)
+
+        if self.apify_api_key and self.apify_actor_id:
+            results, reason = self._search_jobs_apify(normalized_query)
+            if results:
+                attempts.append("apify:ok")
+                return results, "apify", attempts
+            attempts.append(f"apify:{reason}")
+        else:
+            attempts.append("apify:missing_config")
+
+        if self.rapidapi_key:
+            results, reason = self._search_jobs_rapidapi(normalized_query)
+            if results:
+                attempts.append("rapidapi:ok")
+                return results, "rapidapi", attempts
+            attempts.append(f"rapidapi:{reason}")
+        else:
+            attempts.append("rapidapi:missing_key")
+
+        return [], "none", attempts
+
+    def _search_jobs_apify(self, query: str) -> Tuple[List[Dict[str, str]], str]:
+        url = (
+            f"https://api.apify.com/v2/acts/{self.apify_actor_id}"
+            f"/run-sync-get-dataset-items?token={self.apify_api_key}"
+        )
+        payload = {
+            "query": query,
+            "search": query,
+            "keyword": query,
+            "keywords": [query],
+            "maxItems": self.jobs_max_results,
+            "maxResults": self.jobs_max_results,
+        }
+        body, err = self._post_json(url, payload, timeout=max(self.search_http_timeout_s, 18))
+        if body is None:
+            return [], f"http_error:{(err or 'unknown')[:80]}"
+        rows = body if isinstance(body, list) else body.get("items") or body.get("data") or []
+        normalized = self._normalize_job_rows(rows, source="apify")
+        if normalized:
+            return normalized, "ok"
+        return [], "empty_results"
+
+    def _search_jobs_rapidapi(self, query: str) -> Tuple[List[Dict[str, str]], str]:
+        url = "https://jsearch.p.rapidapi.com/search"
+        params = f"?query={self._url_encode(query)}&page=1&num_pages=1&date_posted=all"
+        body, err = self._get_json(
+            url + params,
+            headers={
+                "x-rapidapi-key": self.rapidapi_key,
+                "x-rapidapi-host": "jsearch.p.rapidapi.com",
+            },
+            timeout=max(self.search_http_timeout_s, 15),
+        )
+        if body is None:
+            return [], f"http_error:{(err or 'unknown')[:80]}"
+        rows = body.get("data") or body.get("jobs") or []
+        normalized = self._normalize_job_rows(rows, source="rapidapi")
+        if normalized:
+            return normalized, "ok"
+        return [], "empty_results"
 
     def _search_tavily(self, query: str) -> Tuple[List[Dict[str, str]], str]:
         # Optional deep-research path (slower).
@@ -383,6 +890,177 @@ class SearchingSkill:
     def _normalize(self, text: str) -> str:
         return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", (text or "").lower())).strip()
 
+    def _url_encode(self, text: str) -> str:
+        from urllib.parse import quote_plus
+
+        return quote_plus((text or "").strip())
+
+    def _is_weather_query(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        weather_terms = {
+            "weather", "temperature", "forecast", "humidity", "raining", "rain",
+            "wind", "windy", "hot", "cold", "outside", "sunny", "cloudy",
+        }
+        return any(term in normalized.split() for term in weather_terms) or any(
+            phrase in normalized for phrase in {"what is the weather", "whats the weather", "how is the weather"}
+        )
+
+    def _extract_weather_location(self, query: str) -> str:
+        raw = self._clean_transcript_noise((query or "").strip())
+        if not raw:
+            return self.weather_default_query
+
+        lowered = raw.lower()
+        normalized = self._normalize(raw)
+        generic_weather_query = re.sub(
+            r"\b(what|whats|what s|how|hows|how s|tell|me|show|search|find|check|current|latest|today|now|the|is|it|like|weather|temperature|forecast|humidity|rain|raining|wind|windy|outside)\b",
+            " ",
+            normalized,
+        )
+        generic_weather_query = re.sub(r"\s+", " ", generic_weather_query).strip()
+
+        if not generic_weather_query:
+            return self.weather_default_query
+
+        if any(marker in lowered for marker in {"my location", "current location", "near me", "outside here"}):
+            return "auto:ip"
+        if re.search(r"\b(here|outside)\b", lowered) and " in " not in lowered:
+            return "auto:ip"
+
+        match = re.search(r"\b(?:in|at|for)\s+([a-zA-Z][a-zA-Z .,-]{1,})$", raw, flags=re.IGNORECASE)
+        if match:
+            location = match.group(1).strip(" ,.-")
+            if location:
+                return location
+
+        cleaned = re.sub(
+            r"\b(what(?:'s| is)?|how(?:'s| is)?|tell me|show me|search|find|check|current|latest|today|now|the|weather|temperature|forecast|humidity|rain|raining|wind|windy|outside)\b",
+            " ",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
+        if cleaned and len(cleaned.split()) <= 5 and re.search(r"[A-Za-z]", cleaned):
+            return cleaned
+        return self.weather_default_query
+
+    def _is_sports_query(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        sports_terms = {
+            "sports", "sport", "score", "scores", "scoreboard", "match", "matches", "game", "games",
+            "standings", "table", "points table", "ranking", "rankings", "fixtures", "schedule", "odds",
+            "nfl", "nba", "mlb", "nhl", "wnba", "ufc", "f1", "formula 1", "nascar", "premier league",
+            "la liga", "bundesliga", "serie a", "ligue 1", "champions league", "mls",
+            "college football", "college basketball", "soccer", "football", "basketball", "baseball", "hockey",
+            "tennis", "golf", "racing", "ipl", "cricket",
+        }
+        return any(term in normalized for term in sports_terms)
+
+    def _is_unsupported_espn_sport(self, normalized: str) -> bool:
+        return any(term in normalized for term in {"ipl", "cricket", "bbl", "ranji"})
+
+    def _infer_sport_league(self, normalized: str) -> Tuple[str, str]:
+        mappings = [
+            ("college football", ("football", "college-football")),
+            ("college basketball", ("basketball", "mens-college-basketball")),
+            ("premier league", ("soccer", "eng.1")),
+            ("la liga", ("soccer", "esp.1")),
+            ("bundesliga", ("soccer", "ger.1")),
+            ("serie a", ("soccer", "ita.1")),
+            ("ligue 1", ("soccer", "fra.1")),
+            ("champions league", ("soccer", "uefa.champions")),
+            ("mls", ("soccer", "usa.1")),
+            ("nba", ("basketball", "nba")),
+            ("wnba", ("basketball", "wnba")),
+            ("nfl", ("football", "nfl")),
+            ("mlb", ("baseball", "mlb")),
+            ("nhl", ("hockey", "nhl")),
+            ("ufc", ("mma", "ufc")),
+            ("formula 1", ("racing", "f1")),
+            ("f1", ("racing", "f1")),
+            ("nascar", ("racing", "nascar-premier")),
+            ("pga", ("golf", "pga")),
+            ("lpga", ("golf", "lpga")),
+            ("atp", ("tennis", "atp")),
+            ("wta", ("tennis", "wta")),
+        ]
+        for marker, codes in mappings:
+            if marker in normalized:
+                return codes
+        return "", ""
+
+    def _clean_sports_query(self, query: str) -> str:
+        cleaned = self._normalize(query)
+        cleaned = re.sub(
+            r"\b(check|search|find|lookup|look up|latest|live|today|tonight|last night|score|scores|scoreboard|standings|table|points|result|results|news|headlines)\b",
+            " ",
+            cleaned,
+        )
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned or self._normalize(query)
+
+    def _is_job_query(self, normalized: str) -> bool:
+        if not normalized:
+            return False
+        job_terms = {"job", "jobs", "role", "roles", "hiring", "openings", "vacancy", "vacancies", "career", "careers"}
+        return any(term in normalized.split() for term in job_terms) or (
+            "job" in normalized or "role" in normalized or "hiring" in normalized
+        )
+
+    def _normalize_jobs_query(self, query: str) -> str:
+        cleaned = self._normalize(query)
+        cleaned = re.sub(r"\b(search|find|lookup|look up)\b", " ", cleaned)
+        cleaned = re.sub(r"\b(job|jobs|role|roles|hiring|openings|vacancy|vacancies|career|careers)\b", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned or self._normalize(query)
+
+    def _summarize_jobs(self, query: str, jobs: List[Dict[str, str]]) -> str:
+        role = self._normalize_jobs_query(query) or query.strip()
+        lines = [f"Here are the strongest live job results I found for {role}:"]
+        for job in jobs[: self.jobs_max_results]:
+            title = job.get("title") or "Untitled role"
+            company = job.get("company") or "Unknown company"
+            location = job.get("location") or "Location not listed"
+            extras = []
+            if job.get("salary"):
+                extras.append(f"salary: {job['salary']}")
+            if job.get("posted"):
+                extras.append(f"posted: {job['posted']}")
+            extra_text = f" ({', '.join(extras)})" if extras else ""
+            lines.append(f"- {title} at {company} — {location}{extra_text}")
+        lines.append("Ask me to narrow it by location, experience level, remote, or salary if you want.")
+        return "\n".join(lines)
+
+    def _summarize_job_links(
+        self,
+        query: str,
+        results: List[Dict[str, str]],
+        attempts: List[str],
+        provider_used: str,
+    ) -> str:
+        if not results:
+            return ""
+        role = self._normalize_jobs_query(query) or query.strip()
+        lines = [
+            f"Live jobs providers were unavailable for {role}, so here are the strongest job-board links I found:",
+        ]
+        for item in results[: self.max_results]:
+            title = (item.get("title") or "Untitled result").strip()
+            url = (item.get("url") or "").strip()
+            snippet = (item.get("snippet") or item.get("text") or "").strip()
+            line = f"- {title}"
+            if snippet:
+                line += f" — {snippet[:140].rstrip()}"
+            if url:
+                line += f" ({url})"
+            lines.append(line)
+        if self.debug_output:
+            lines.append("")
+            lines.append(f"[debug] provider={provider_used} | attempts={' | '.join(attempts)}")
+        return "\n".join(lines)
+
     def _looks_like_news_query(self, query: str) -> bool:
         normalized = self._normalize(query)
         return bool(re.search(r"\b(news|headline|latest|today|yesterday|last night|breaking)\b", normalized))
@@ -399,6 +1077,31 @@ class SearchingSkill:
             req_headers.update(headers)
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=req_headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as res:
+                return json.loads(res.read().decode("utf-8", errors="replace")), None
+        except urllib.error.HTTPError as exc:
+            raw = ""
+            try:
+                raw = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                raw = str(exc)
+            return None, raw or str(exc)
+        except Exception as exc:
+            return None, self._safe_error(exc)
+
+    def _get_json(
+        self,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        timeout: int = 20,
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        req_headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36"
+        }
+        if headers:
+            req_headers.update(headers)
+        req = urllib.request.Request(url, headers=req_headers, method="GET")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as res:
                 return json.loads(res.read().decode("utf-8", errors="replace")), None
@@ -478,6 +1181,70 @@ class SearchingSkill:
             )
         return [r for r in out if r.get("url")]
 
+    def _normalize_job_rows(self, rows, source: str) -> List[Dict[str, str]]:
+        normalized: List[Dict[str, str]] = []
+        if not isinstance(rows, list):
+            return normalized
+        for row in rows[: self.jobs_max_results]:
+            if not isinstance(row, dict):
+                continue
+            title = (
+                row.get("job_title")
+                or row.get("title")
+                or row.get("positionName")
+                or row.get("position")
+                or ""
+            )
+            company = (
+                row.get("employer_name")
+                or row.get("company")
+                or row.get("companyName")
+                or row.get("company_name")
+                or ""
+            )
+            location = (
+                row.get("job_city")
+                or row.get("location")
+                or row.get("job_location")
+                or row.get("city")
+                or row.get("job_country")
+                or ""
+            )
+            url = (
+                row.get("job_apply_link")
+                or row.get("url")
+                or row.get("link")
+                or row.get("applyUrl")
+                or row.get("job_url")
+                or ""
+            )
+            posted = (
+                row.get("job_posted_at_datetime_utc")
+                or row.get("postedAt")
+                or row.get("datePosted")
+                or ""
+            )
+            salary = (
+                row.get("job_min_salary")
+                or row.get("salary")
+                or row.get("salaryRange")
+                or ""
+            )
+            if not title and not url:
+                continue
+            normalized.append(
+                {
+                    "title": str(title).strip() or "Untitled role",
+                    "company": str(company).strip() or "Unknown company",
+                    "location": str(location).strip() or "Location not listed",
+                    "url": str(url).strip(),
+                    "posted": str(posted).strip(),
+                    "salary": str(salary).strip(),
+                    "source": source,
+                }
+            )
+        return [item for item in normalized if item.get("title")]
+
     def _is_quota_error(self, message: str) -> bool:
         text = (message or "").lower()
         signals = [
@@ -507,6 +1274,16 @@ class SearchingSkill:
                 if isinstance(nested, str) and nested.strip():
                     return nested.strip()
         return ""
+
+    def _extract_api_error_from_text(self, raw: str) -> str:
+        text = (raw or "").strip()
+        if not text:
+            return ""
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return ""
+        return self._extract_api_error(parsed)
 
     def _safe_error(self, exc: Exception) -> str:
         text = str(exc).strip()
@@ -697,3 +1474,20 @@ class SearchingSkill:
                 if len(out) >= 4:
                     return out
         return out
+
+    def _extract_json_object(self, text: str) -> Optional[Dict]:
+        if not text:
+            return None
+        candidate = text
+        fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+        if fence:
+            candidate = fence.group(1)
+        else:
+            match = re.search(r"(\{.*\})", text, flags=re.DOTALL)
+            if match:
+                candidate = match.group(1)
+        try:
+            parsed = json.loads(candidate)
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, dict) else None

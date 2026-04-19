@@ -1,5 +1,6 @@
 """Skill: deterministic app access commands."""
 
+import json
 import re
 import subprocess
 import sys
@@ -7,6 +8,8 @@ import urllib.parse
 import urllib.request
 import webbrowser
 import os
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -50,6 +53,10 @@ class AppAccessSkill:
             "reddit": "https://www.reddit.com",
         }
         self.preferred_media_browser = "chrome"
+        self.media_reuse_browser_tabs = (
+            os.environ.get("CALCIE_MEDIA_REUSE_BROWSER_TABS", "1").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
         self.media_open_mode = (os.environ.get("CALCIE_MEDIA_OPEN_MODE") or "app_first").strip().lower()
         if self.media_open_mode not in {"app_first", "browser_only"}:
             self.media_open_mode = "app_first"
@@ -72,6 +79,19 @@ class AppAccessSkill:
             "youtube music": "com.google.Chrome.app.aeblfdkhhhdcdjpifhhbdiojplfjncoa",
             "youtube": "com.google.Chrome.app.agimnkijcaahngcdmfeangaknmldooml",
         }
+        self.project_root = Path(__file__).resolve().parents[2]
+        self.shell_status_path = self.project_root / ".calcie" / "runtime" / "macos_shell_status.json"
+        self.media_player_command_path = self.project_root / ".calcie" / "runtime" / "media_player_command.json"
+        self.desktop_player_enabled = (
+            os.environ.get("CALCIE_DESKTOP_PLAYER_ENABLED", "1").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+        try:
+            self.desktop_player_shell_max_age_s = float(
+                os.environ.get("CALCIE_DESKTOP_PLAYER_SHELL_MAX_AGE_S", "15").strip()
+            )
+        except ValueError:
+            self.desktop_player_shell_max_age_s = 15.0
 
     def extract_open_app_command(self, user_input: str) -> Optional[str]:
         raw = (user_input or "").strip()
@@ -318,7 +338,7 @@ class AppAccessSkill:
             return None
         compact = re.sub(r"\s+", " ", raw).strip()
         match = re.match(
-            r"^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?P<action>play|resume|continue)\b\s*(?P<body>.*)$",
+            r"^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?P<action>play|pause|resume|continue)\b\s*(?P<body>.*)$",
             compact,
             flags=re.IGNORECASE,
         )
@@ -336,6 +356,11 @@ class AppAccessSkill:
 
         action, body = parsed
         lowered = body.lower()
+
+        if self._desktop_player_shell_available():
+            player_result = self._handle_play_command_via_calcie_player(action, body)
+            if player_result:
+                return player_result
 
         # OTT intentionally deferred for now.
         ott_markers = ["netflix", "prime", "prime video", "hotstar", "disney", "zee5", "sony liv", "jio cinema"]
@@ -371,6 +396,13 @@ class AppAccessSkill:
             search_q = query
             if "official video" not in search_q.lower():
                 search_q = f"{search_q} official video"
+
+            # For YouTube desktop app wrappers on macOS, direct watch URLs are often
+            # interpreted as plain search text. Use an app-native search sequence first.
+            app_play_result = self._play_youtube_query_in_app_macos(search_q)
+            if app_play_result:
+                return app_play_result
+
             watch_url = self._resolve_youtube_watch_url(search_q)
             if watch_url:
                 return self._open_media_url(
@@ -399,7 +431,218 @@ class AppAccessSkill:
                 prefer_existing_browser=True,
             )
         url = f"https://music.youtube.com/search?q={urllib.parse.quote_plus(query)}"
-        return self._open_media_url("ytmusic", url, f"YouTube Music: {query}")
+        return self._open_media_url(
+            "ytmusic",
+            url,
+            f"YouTube Music: {query}",
+            prefer_existing_browser=True,
+        )
+
+    def _handle_play_command_via_calcie_player(self, action: str, body: str) -> Optional[str]:
+        if sys.platform != "darwin" or not self.desktop_player_enabled:
+            return None
+
+        lowered = (body or "").strip().lower()
+        query = self._clean_media_query(body)
+
+        if action == "pause":
+            if self._dispatch_desktop_player_command("pause", show_player=False):
+                return "Pausing CALCIE Player..."
+            return None
+
+        if action in {"resume", "continue"} and (not lowered or "music" in lowered):
+            if self._dispatch_desktop_player_command("play", show_player=False):
+                return "Resuming CALCIE Player..."
+            return None
+
+        if lowered in {"", "music", "songs", "song", "my music", "some music"}:
+            if self._dispatch_desktop_player_command(
+                "load",
+                url="https://music.youtube.com",
+                title="YouTube Music",
+                subtitle="Opening YouTube Music inside CALCIE Player.",
+            ):
+                return "Opening YouTube Music in CALCIE Player..."
+            return None
+
+        if lowered in {"youtube", "yt"}:
+            if self._dispatch_desktop_player_command(
+                "load",
+                url="https://www.youtube.com",
+                title="YouTube",
+                subtitle="Opening YouTube home inside CALCIE Player.",
+            ):
+                return "Opening YouTube in CALCIE Player..."
+            return None
+
+        if lowered in {"youtube music", "ytmusic", "yt music"}:
+            if self._dispatch_desktop_player_command(
+                "load",
+                url="https://music.youtube.com",
+                title="YouTube Music",
+                subtitle="Opening YouTube Music inside CALCIE Player.",
+            ):
+                return "Opening YouTube Music in CALCIE Player..."
+            return None
+
+        target_platform = "ytmusic"
+        if re.search(r"\b(video song|video|music video|official video|mv)\b", lowered):
+            target_platform = "youtube"
+        if re.search(r"\b(?:on|in|using)\s+(youtube|yt)\b", lowered):
+            target_platform = "youtube"
+        if re.search(r"\b(?:on|in|using)\s+(youtube music|yt music|ytmusic)\b", lowered):
+            target_platform = "ytmusic"
+
+        if target_platform == "youtube":
+            if not query:
+                if self._dispatch_desktop_player_command(
+                    "load",
+                    url="https://www.youtube.com",
+                    title="YouTube",
+                    subtitle="Opening YouTube inside CALCIE Player.",
+                ):
+                    return "Opening YouTube in CALCIE Player..."
+                return None
+            search_q = query
+            if "official video" not in search_q.lower():
+                search_q = f"{search_q} official video"
+            watch_url = self._resolve_youtube_watch_url(search_q)
+            target_url = watch_url or f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(search_q)}"
+            if self._dispatch_desktop_player_command(
+                "load",
+                url=target_url,
+                title=f"YouTube: {query}",
+                subtitle="Playing in CALCIE Player via the shared desktop media surface.",
+            ):
+                return f"Playing {query} in CALCIE Player..."
+            return None
+
+        if not query:
+            if self._dispatch_desktop_player_command(
+                "load",
+                url="https://music.youtube.com",
+                title="YouTube Music",
+                subtitle="Opening YouTube Music inside CALCIE Player.",
+            ):
+                return "Opening YouTube Music in CALCIE Player..."
+            return None
+
+        music_watch_url = self._resolve_ytmusic_watch_url(query)
+        target_url = music_watch_url or f"https://music.youtube.com/search?q={urllib.parse.quote_plus(query)}"
+        if self._dispatch_desktop_player_command(
+            "load",
+            url=target_url,
+            title=f"YouTube Music: {query}",
+            subtitle="Playing in CALCIE Player via the shared desktop media surface.",
+        ):
+            return f"Playing {query} in CALCIE Player..."
+        return None
+
+    def _desktop_player_shell_available(self) -> bool:
+        if sys.platform != "darwin" or not self.desktop_player_enabled:
+            return False
+        try:
+            data = json.loads(self.shell_status_path.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+
+        if not data.get("player_supported"):
+            return False
+
+        updated_at = str(data.get("updated_at") or "").strip()
+        if not updated_at:
+            return False
+        try:
+            parsed = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
+        return age <= self.desktop_player_shell_max_age_s
+
+    def _dispatch_desktop_player_command(
+        self,
+        action: str,
+        url: Optional[str] = None,
+        title: Optional[str] = None,
+        subtitle: Optional[str] = None,
+        show_player: bool = True,
+    ) -> bool:
+        payload = {
+            "action": action,
+            "request_id": uuid.uuid4().hex,
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "url": url or "",
+            "title": title or "",
+            "subtitle": subtitle or "",
+            "show_player": bool(show_player),
+        }
+        try:
+            self.media_player_command_path.parent.mkdir(parents=True, exist_ok=True)
+            self.media_player_command_path.write_text(
+                json.dumps(payload, ensure_ascii=True),
+                encoding="utf-8",
+            )
+            return True
+        except Exception:
+            return False
+
+    def _play_youtube_query_in_app_macos(self, query: str) -> Optional[str]:
+        if sys.platform != "darwin":
+            return None
+        if self._media_mode_for_platform("youtube") not in {"app_only", "app_first"}:
+            return None
+
+        open_result = self._open_media_url("youtube", "https://www.youtube.com", "YouTube")
+        if not open_result.startswith("Opening "):
+            return None
+
+        app_match = re.search(r"\bin\s+(.+?)\s+app\.\.\.$", open_result, flags=re.IGNORECASE)
+        if not app_match:
+            # Not app mode (likely browser path), let caller continue with URL flow.
+            return None
+        app_name = app_match.group(1).strip()
+        if not app_name:
+            return None
+
+        ok = self._youtube_app_search_and_open_first_macos(app_name, query)
+        if not ok:
+            return None
+        return f"Opening YouTube and playing {query}..."
+
+    def _youtube_app_search_and_open_first_macos(self, app_name: str, query: str) -> bool:
+        if sys.platform != "darwin":
+            return False
+        escaped_app = self._escape_applescript(app_name)
+        escaped_query = self._escape_applescript(query)
+        script = (
+            f'tell application "{escaped_app}" to activate\n'
+            "delay 0.45\n"
+            'tell application "System Events"\n'
+            "key code 53\n"  # ESC: close shortcuts/dialog if present
+            "delay 0.08\n"
+            "key code 53\n"
+            "delay 0.08\n"
+            'keystroke "/"\n'  # focus YouTube search
+            "delay 0.12\n"
+            f'keystroke "{escaped_query}"\n'
+            "key code 36\n"  # Enter to search
+            "delay 1.15\n"
+            "key code 48\n"  # Tab to first result focus region
+            "delay 0.08\n"
+            "key code 36\n"  # Enter first result
+            "end tell"
+        )
+        try:
+            proc = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+            )
+            return proc.returncode == 0
+        except Exception:
+            return False
 
     def _clean_media_query(self, body: str) -> str:
         text = (body or "").strip()
@@ -441,6 +684,15 @@ class AppAccessSkill:
     ) -> str:
         """Open media URL with per-platform mode (app_only/app_first/browser_only)."""
         media_mode = self._media_mode_for_platform(platform)
+
+        if (
+            self.media_reuse_browser_tabs
+            and sys.platform == "darwin"
+            and media_mode != "app_only"
+            and self._open_media_url_in_existing_browser_surface_macos(platform, url)
+        ):
+            browser_name = self.app_commands.get(self.preferred_media_browser, self.preferred_media_browser)
+            return f"Opening {label} in {browser_name}..."
 
         if prefer_existing_browser and media_mode != "app_only":
             reused = self._open_url_in_browser(url, label, reuse_existing_tab=True)
@@ -575,23 +827,30 @@ class AppAccessSkill:
         if sys.platform != "darwin":
             return "App-window URL routing is only supported on macOS."
 
-        # Reuse running app window first to avoid new instances.
+        # Non-browser app wrappers (e.g., YouTube app) should not receive URL keystrokes.
+        # Typing a URL containing "?" into page context can open YouTube shortcuts modal.
+        if not self._supports_keyboard_url_navigation_macos(app_name):
+            return self.open_target_in_app(url, app_name, allow_default_browser_fallback=False)
+
+        # Reuse running browser window first to avoid new instances.
         if self._is_app_running_macos(app_name):
             if self._navigate_url_in_front_app_macos(app_name, url):
                 return f"Opening {url} in {app_name}..."
 
-        # Start app (or bring to front) without URL payload, then navigate within app window.
+        # Start browser (or bring to front) without URL payload, then navigate within app window.
         started_ok, opened_as, _ = self._open_app_macos(app_name)
         if started_ok:
             target_name = opened_as or app_name
             if self._navigate_url_in_front_app_macos(target_name, url):
                 return f"Opening {url} in {target_name}..."
 
-        # Last resort for app wrappers that accept URL arguments.
+        # Last resort for browsers/wrappers that accept URL arguments.
         return self.open_target_in_app(url, app_name, allow_default_browser_fallback=False)
 
     def _navigate_url_in_front_app_macos(self, app_name: str, url: str) -> bool:
         if sys.platform != "darwin":
+            return False
+        if not self._supports_keyboard_url_navigation_macos(app_name):
             return False
 
         escaped_app = self._escape_applescript(app_name)
@@ -606,6 +865,108 @@ class AppAccessSkill:
             "key code 36\n"
             "end tell"
         )
+        try:
+            proc = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+            )
+            return proc.returncode == 0
+        except Exception:
+            return False
+
+    def _supports_keyboard_url_navigation_macos(self, app_name: str) -> bool:
+        lowered = (app_name or "").strip().lower()
+        return lowered in {
+            "google chrome",
+            "chrome",
+            "safari",
+            "firefox",
+            "microsoft edge",
+            "edge",
+        }
+
+    def _media_domains(self, platform: str) -> list:
+        key = (platform or "").strip().lower()
+        if key == "ytmusic":
+            return ["music.youtube.com"]
+        if key == "youtube":
+            return ["youtube.com", "www.youtube.com"]
+        return []
+
+    def _open_media_url_in_existing_browser_surface_macos(self, platform: str, url: str) -> bool:
+        if sys.platform != "darwin":
+            return False
+        browser_name = self.app_commands.get(self.preferred_media_browser, self.preferred_media_browser)
+        if not self._is_app_running_macos(browser_name):
+            return False
+
+        domains = self._media_domains(platform)
+        if not domains:
+            return False
+
+        escaped_url = self._escape_applescript(url)
+        lowered = browser_name.strip().lower()
+
+        if lowered == "google chrome":
+            domain_checks = " or ".join(
+                [f'((URL of t as text) contains "{self._escape_applescript(domain)}")' for domain in domains]
+            ) or "false"
+            script = (
+                'tell application "Google Chrome"\n'
+                "activate\n"
+                "if (count of windows) = 0 then make new window\n"
+                "set foundTab to false\n"
+                "repeat with w in windows\n"
+                "repeat with t in tabs of w\n"
+                f"if {domain_checks} then\n"
+                "set active tab index of w to (index of t)\n"
+                "set index of w to 1\n"
+                f'set URL of t to "{escaped_url}"\n'
+                "set foundTab to true\n"
+                "exit repeat\n"
+                "end if\n"
+                "end repeat\n"
+                "if foundTab then exit repeat\n"
+                "end repeat\n"
+                "if not foundTab then\n"
+                'tell front window to make new tab with properties {URL:"'
+                + escaped_url
+                + '"}\n'
+                "end if\n"
+                "end tell"
+            )
+        elif lowered == "safari":
+            domain_checks = " or ".join(
+                [f'((URL of t as text) contains "{self._escape_applescript(domain)}")' for domain in domains]
+            ) or "false"
+            script = (
+                'tell application "Safari"\n'
+                "activate\n"
+                "if (count of windows) = 0 then make new document\n"
+                "set foundTab to false\n"
+                "repeat with w in windows\n"
+                "repeat with t in tabs of w\n"
+                f"if {domain_checks} then\n"
+                "set current tab of w to t\n"
+                f'set URL of t to "{escaped_url}"\n'
+                "set index of w to 1\n"
+                "set foundTab to true\n"
+                "exit repeat\n"
+                "end if\n"
+                "end repeat\n"
+                "if foundTab then exit repeat\n"
+                "end repeat\n"
+                "if not foundTab then\n"
+                'tell front window to set current tab to (make new tab with properties {URL:"'
+                + escaped_url
+                + '"})\n'
+                "end if\n"
+                "end tell"
+            )
+        else:
+            return False
+
         try:
             proc = subprocess.run(
                 ["osascript", "-e", script],

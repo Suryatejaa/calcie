@@ -49,6 +49,53 @@ SEARCH_SYNTH_USER_TEMPLATE = (
     "{source_blob}"
 )
 
+SPORTS_MCP_INTERPRET_SYSTEM_PROMPT = (
+    "You are CALCIE's sports routing interpreter. Return strict JSON only.\n"
+    "Schema: "
+    "{\"tool\":\"espn_live_scoreboard|espn_scoreboard|espn_standings|espn_rankings|espn_news|espn_search\","
+    "\"sport\":\"string\","
+    "\"league\":\"string\","
+    "\"query\":\"string\","
+    "\"reason\":\"short string\"}\n"
+    "Rules:\n"
+    "- prefer espn_live_scoreboard or espn_scoreboard for live scores, results, and last-night score requests\n"
+    "- prefer espn_standings for standings and league tables\n"
+    "- prefer espn_rankings for college/UFC/tennis rankings when appropriate\n"
+    "- prefer espn_news for sports headlines\n"
+    "- prefer espn_search when the request is team/player-specific or uncertain\n"
+    "- use ESPN-style sport/league codes when known, for example basketball/nba, football/nfl, baseball/mlb, hockey/nhl, soccer/eng.1, mma/ufc, racing/f1\n"
+    "- if unsupported or uncertain, keep tool as espn_search and put the cleaned user intent in query\n"
+    "- no markdown, no prose, strict JSON only"
+)
+
+WEATHER_GROUNDED_SYSTEM_PROMPT = (
+    "You are CALCIE's grounded weather assistant. "
+    "Use current grounded web information when available. "
+    "Answer directly with: resolved location, current temperature in C, feels-like temperature in C when meaningfully different, "
+    "current conditions, humidity, wind, and today's high/low if available. "
+    "Keep it short, factual, and natural. "
+    "If the location is ambiguous, use the provided default location. "
+    "Do not invent data. If something is unavailable, say so briefly."
+)
+
+TASK_INTERPRET_SYSTEM_PROMPT = (
+    "You are CALCIE's commerce task interpreter. Return strict JSON only.\n"
+    "Schema: "
+    "{\"domain\":\"shopping|food_delivery|groceries|movie|general\","
+    "\"platform\":\"amazon|flipkart|swiggy|zomato|blinkit|zepto|instamart|bigbasket|netflix|prime_video|unknown\","
+    "\"item_query\":\"string\","
+    "\"intent\":\"browse|add_to_cart|review_only|checkout|play|unknown\","
+    "\"needs_confirmation\":true|false,"
+    "\"reason\":\"short string\"}\n"
+    "Rules:\n"
+    "- classify food items like biriyani, pizza, momos under food_delivery\n"
+    "- classify groceries/daily needs under groceries\n"
+    "- classify products/bags/electronics/furniture under shopping\n"
+    "- only set needs_confirmation=true for payment, OTP, banking, or destructive actions\n"
+    "- keep item_query short and clean\n"
+    "- no markdown, no prose, strict JSON only"
+)
+
 AGENTIC_PLAN_PROMPT = (
     "You are a desktop task planner. Return strict JSON only.\n"
     "Allowed tools:\n"
@@ -57,7 +104,8 @@ AGENTIC_PLAN_PROMPT = (
     "3) app.play {command}\n"
     "4) search.query {query}\n"
     "5) computer.command {command}\n"
-    "6) say {text}\n"
+    "6) vision.inspect {goal}\n"
+    "7) say {text}\n"
     "Output schema: "
     "{\"goal\":\"string\",\"risk\":\"low|medium|high\",\"steps\":[{\"tool\":\"...\",\"args\":{...},\"why\":\"string\"}]}\n"
     "Rules:\n"
@@ -65,7 +113,22 @@ AGENTIC_PLAN_PROMPT = (
     "- never finalize payment/place order\n"
     "- for shopping: stop at cart/review stage\n"
     "- for movie playback: open platform search/title and start playback page\n"
+    "- action_command returned by vision must be a safe CALCIE command like `control scroll down 700`, `control click 1200 420`, `open chrome`, or `search latest ...`\n"
     "- steps must be executable by tools exactly"
+)
+
+VISION_ANALYSIS_PROMPT = (
+    "You are CALCIE's screen monitoring vision engine. "
+    "Analyze the screenshot against the monitoring goal and return strict JSON only. "
+    "Schema: "
+    "{\"matched\":true|false,"
+    "\"severity\":\"low|medium|high\","
+    "\"summary\":\"short factual summary\","
+    "\"alert_message\":\"short alert to speak to the user\","
+    "\"should_act\":true|false,"
+    "\"action_command\":\"optional safe CALCIE command string (for example control scroll down 700 or control click 1200 420)\","
+    "\"evidence\":[\"bullet 1\",\"bullet 2\"]}. "
+    "Rules: be factual, avoid hallucinating hidden UI state, and only set should_act=true when the screenshot strongly supports it."
 )
 
 

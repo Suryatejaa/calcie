@@ -28,3 +28,8 @@ mobile_v1/.env
 mobile_v2/node_modules/
 mobile_v2/.expo/
 mobile_v2/.env
+
+# Swift package build output
+calcie_macos/.build/
+calcie_macos/.swiftpm/
+dist/

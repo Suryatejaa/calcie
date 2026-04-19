@@ -19,7 +19,7 @@ class RouteDecision:
 class CommandArbiter:
     """Lightweight orchestrator for skill routing with typo tolerance."""
 
-    ROUTES = ("coding", "agentic", "app", "computer", "search")
+    ROUTES = ("coding", "vision", "agentic", "app", "computer", "search")
 
     _COMMAND_ALIASES = {
         "search": {"search", "serch", "seach", "sreach", "lookup", "look", "find"},
@@ -28,6 +28,7 @@ class CommandArbiter:
         "open": {"open", "opne", "oen", "launch", "start"},
         "play": {"play", "plya", "plai", "resume", "continue"},
         "order": {"order", "oder", "ordr", "buy", "checkout", "book"},
+        "vision": {"vision", "monitor", "moniter", "watch", "observe", "screen"},
     }
 
     _COMMAND_ROUTE = {
@@ -37,6 +38,7 @@ class CommandArbiter:
         "open": "app",
         "play": "app",
         "order": "agentic",
+        "vision": "vision",
     }
 
     _ROUTE_KEYWORDS = {
@@ -48,6 +50,10 @@ class CommandArbiter:
         "agentic": {
             "order", "buy", "checkout", "book", "payment", "cart", "amazon",
             "flipkart", "netflix", "prime", "ticket", "reservation",
+        },
+        "vision": {
+            "vision", "monitor", "watch", "observe", "screen", "screenshot",
+            "dashboard", "alert", "warning", "terminal", "loop",
         },
         "app": {
             "open", "launch", "start", "play", "resume", "continue",
@@ -169,6 +175,7 @@ class CommandArbiter:
             return 0.0
         checks = {
             "coding": ("code ",),
+            "vision": ("vision ", "monitor ", "watch my screen ", "monitor my screen ", "analyze my screen "),
             "agentic": ("order ", "buy ", "checkout ", "book "),
             "app": ("open ", "launch ", "start ", "play ", "resume ", "continue "),
             "computer": ("control ", "computer ", "click ", "scroll ", "type ", "press ", "hotkey ", "screenshot "),

@@ -17,6 +17,7 @@ import urllib.error
 import urllib.parse
 import socket
 import random
+from collections import deque
 
 import time
 import threading
@@ -33,6 +34,7 @@ from calcie_core.orchestration import CommandArbiter
 from calcie_core.prompts import (
     GENERAL_CHAT_PROMPT,
     PROFILE_CHAT_PROMPT,
+    VISION_ANALYSIS_PROMPT,
     WEB_GROUNDED_CHAT_PROMPT,
     build_profile_context,
 )
@@ -71,6 +73,7 @@ from calcie_core.skills import (
     AppAccessSkill,
     CodingSkill,
     ComputerControlSkill,
+    ScreenVisionSkill,
     SearchingSkill,
 )
 
@@ -103,6 +106,16 @@ try:
     SEARCH_AVAILABLE = True
 except ImportError:
     SEARCH_AVAILABLE = False
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
+
+try:
+    import pyautogui  # type: ignore
+except Exception:
+    pyautogui = None
 
 input_queue = queue.Queue()
 
@@ -146,7 +159,7 @@ class Calcie:
     WAKE_WORDS = [
         "calcie", "kelsey", "kelsie", "kelcey", "calcy", "calsie",
         "calsi", "kalsi", "kalki", "calc", "cal c", "cal", "cali", "lc",
-        "chelsea", "radhika", "samantha", "pinky"
+        "chelsea", "radhika", "samantha", "pinky","jarvis","friday","edith"
     ]
 
     HOOK_PHRASES = [
@@ -271,6 +284,7 @@ class Calcie:
             "CALCIE_ROUTER_LEADING_FIX_THRESHOLD", 0.76, 0.68, 0.95
         )
         self.router_debug = self._env_bool("CALCIE_ROUTER_DEBUG", False)
+        self.route_trace_enabled = self._env_bool("CALCIE_ROUTE_TRACE_ENABLED", True)
         self.feedback_enabled = self._env_bool("CALCIE_FEEDBACK_ENABLED", True)
         self.feedback_ack_speak_enabled = self._env_bool("CALCIE_FEEDBACK_ACK_SPEAK_ENABLED", True)
         self.feedback_ack_delay_s = self._env_float("CALCIE_FEEDBACK_ACK_DELAY_S", 1.0, 0.0, 4.0)
@@ -289,6 +303,11 @@ class Calcie:
         )
         self.tts_chunk_chars = self._env_int("CALCIE_TTS_CHUNK_CHARS", 170, 80, 500)
         self.tts_debug = self._env_bool("CALCIE_TTS_DEBUG", False)
+        self.wake_ack_enabled = self._env_bool("CALCIE_WAKE_ACK_ENABLED", True)
+        self.wake_ack_speak_enabled = self._env_bool("CALCIE_WAKE_ACK_SPEAK_ENABLED", True)
+        self.wake_phrase_time_limit_s = self._env_float("CALCIE_WAKE_PHRASE_TIME_LIMIT_S", 8.0, 2.0, 15.0)
+        self.voice_phrase_time_limit_s = self._env_float("CALCIE_VOICE_PHRASE_TIME_LIMIT_S", 12.0, 3.0, 24.0)
+        self.voice_timeout_s = self._env_float("CALCIE_VOICE_TIMEOUT_S", 12.0, 2.0, 30.0)
         self.tts_provider_mode = (
             os.environ.get("CALCIE_TTS_PROVIDER", "auto").strip().lower()
         )
@@ -303,6 +322,13 @@ class Calcie:
         self.google_tts_disable_reason = ""
         self.google_tts_disable_logged = False
         self.project_root = Path.cwd().resolve()
+        self.runtime_state_lock = threading.Lock()
+        self.runtime_state = "starting"
+        self.runtime_state_detail = ""
+        self.last_route = ""
+        self.last_response = ""
+        self.last_user_command = ""
+        self.runtime_events = deque(maxlen=self._env_int("CALCIE_RUNTIME_EVENT_MAX", 80, 20, 500))
         self.feedback_phrases = self._load_feedback_phrases()
         self.code_tools_enabled = os.environ.get("CALCIE_CODE_TOOLS_ENABLED", "1").strip().lower() in {
             "1", "true", "yes", "on"
@@ -321,17 +347,26 @@ class Calcie:
         self.computer_skill = ComputerControlSkill(
             project_root=self.project_root,
         )
+        self.screen_vision_skill = ScreenVisionSkill(
+            project_root=self.project_root,
+            analyze_image=self._analyze_screen_snapshot,
+            notify_user=self._notify_screen_vision_alert,
+            execute_action=self._execute_screen_vision_action,
+        )
         self.searching_skill = SearchingSkill(
             llm_collect_text=self._collect_llm_text,
             fallback_search=self.web_search,
             max_results=5,
             max_source_chars=5000,
+            app_skill=self.app_skill,
+            project_root=self.project_root,
         )
         self.agentic_computer_use_skill = AgenticComputerUseSkill(
             llm_collect_text=self._collect_llm_text,
             app_skill=self.app_skill,
             computer_skill=self.computer_skill,
             searching_skill=self.searching_skill,
+            vision_skill=self.screen_vision_skill,
         )
         self.command_arbiter = CommandArbiter(
             threshold=self.router_confidence_threshold,
@@ -438,6 +473,8 @@ class Calcie:
         self._stderr_saved_fd = None
         self._stderr_devnull_fd = None
         threading.Thread(target=self._speech_worker, daemon=True).start()
+        self._set_runtime_state("idle", "Ready")
+        self._record_runtime_event("runtime", "CALCIE runtime initialized", severity="low", state="idle")
 
         # Register device + start background command poller for cross-device routing.
         if self.sync_client:
@@ -654,6 +691,25 @@ class Calcie:
         if kind in self.feedback_speak_kinds:
             self._schedule_ack_speech(line)
 
+    def _handle_wake_ack(self):
+        if not self.wake_ack_enabled:
+            return
+        short_acks = [
+            "Mm-hmm?",
+            "Yeah?",
+            "I'm here.",
+            "Yes?",
+            "Tell me.",
+        ]
+        line = random.choice(short_acks)
+        print(f"\033[94mCalcie:\033[0m {line}")
+        if self.wake_ack_speak_enabled:
+            # Wake ack should cut through immediately, not wait behind stale queued speech.
+            self._cancel_pending_ack_speech()
+            self._clear_speech_queue()
+            self.speak(line)
+            self.wait_for_speech()
+
     def _speak_with_bridge(self, kind: str, text: str, preempt: bool = False):
         if not text:
             return
@@ -772,12 +828,16 @@ class Calcie:
         messages: list,
         max_output_tokens: int,
         forced_provider: str = None,
+        forced_model: str = None,
+        enable_web_grounding: bool = False,
     ) -> str:
         parts = []
         for token in self._call_llm(
             messages,
             max_output_tokens=max_output_tokens,
             forced_provider=forced_provider,
+            forced_model=forced_model,
+            enable_web_grounding=enable_web_grounding,
         ):
             parts.append(token)
         return "".join(parts).strip()
@@ -803,6 +863,18 @@ class Calcie:
     def _handle_computer_command(self, user_input: str):
         return self.computer_skill.handle_command(user_input)
 
+    def _handle_vision_command(self, user_input: str):
+        response, speak = self.screen_vision_skill.handle_command(user_input)
+        if response is not None:
+            lowered = (user_input or "").lower()
+            if "vision start" in lowered or "monitor my screen" in lowered or "watch my screen" in lowered:
+                self._set_runtime_state("vision_monitoring", "Watching screen")
+                self._record_runtime_event("vision", "Vision monitor started", severity="low", route="vision", state="vision_monitoring")
+            elif "vision stop" in lowered or "stop monitor" in lowered or "stop vision" in lowered:
+                self._set_runtime_state("idle", "Ready")
+                self._record_runtime_event("vision", "Vision monitor stopped", severity="low", route="vision", state="idle")
+        return response, speak
+
     def _handle_agentic_computer_use_command(self, user_input: str):
         return self.agentic_computer_use_skill.handle_command(user_input)
 
@@ -811,6 +883,7 @@ class Calcie:
         if not raw:
             return {
                 "coding": False,
+                "vision": False,
                 "agentic": False,
                 "app": False,
                 "computer": False,
@@ -824,13 +897,17 @@ class Calcie:
         )
         search_intent = self.searching_skill.is_search_intent(raw)
         coding_intent = self._is_code_command(raw)
+        vision_intent = self.screen_vision_skill.is_vision_intent(raw)
         computer_intent = self.computer_skill._is_control_intent(raw)
         agentic_intent = self.agentic_computer_use_skill._should_trigger(raw)
+        if vision_intent:
+            coding_intent = False
         if agentic_intent and self.agentic_computer_use_skill.essential_only:
             agentic_intent = self.agentic_computer_use_skill._is_essential_task(raw)
 
         return {
             "coding": bool(coding_intent),
+            "vision": bool(vision_intent),
             "agentic": bool(agentic_intent),
             "app": bool(app_intent),
             "computer": bool(computer_intent),
@@ -840,6 +917,8 @@ class Calcie:
     def _execute_skill_route(self, route: str, user_input: str):
         if route == "coding":
             return self._handle_code_command(user_input)
+        if route == "vision":
+            return self._handle_vision_command(user_input)
         if route == "agentic":
             return self._handle_agentic_computer_use_command(user_input)
         if route == "app":
@@ -853,7 +932,7 @@ class Calcie:
     def _dispatch_skill_command(self, user_input: str):
         strict_flags = self._strict_route_flags(user_input)
         decision = self.command_arbiter.decide(user_input, strict_flags)
-        default_order = ["coding", "agentic", "app", "computer", "search"]
+        default_order = ["vision", "coding", "agentic", "app", "computer", "search"]
         rewritten = (decision.rewritten_input or "").strip()
         rewritten_changed = bool(rewritten and rewritten != (user_input or "").strip())
 
@@ -863,11 +942,7 @@ class Calcie:
                 route_input = rewritten if route == decision.route and rewritten_changed else user_input
                 response, speak = self._execute_skill_route(route, route_input)
                 if response is not None:
-                    if self.router_debug:
-                        print(
-                            f"\033[90m[router route={route} conf={decision.confidence:.2f} "
-                            f"reason={decision.reason} rewritten={'yes' if rewritten_changed else 'no'}]\033[0m"
-                        )
+                    self._print_route_trace(route, decision, rewritten_changed)
                     return response, speak
             return None, None
 
@@ -875,24 +950,103 @@ class Calcie:
             for route in default_order:
                 response, speak = self._execute_skill_route(route, rewritten)
                 if response is not None:
-                    if self.router_debug:
-                        print(
-                            f"\033[90m[router route={route} conf={decision.confidence:.2f} "
-                            f"reason={decision.reason} rewritten=yes]\033[0m"
-                        )
+                    self._print_route_trace(route, decision, True)
                     return response, speak
 
         for route in default_order:
             response, speak = self._execute_skill_route(route, user_input)
             if response is not None:
-                if self.router_debug:
-                    print(
-                        f"\033[90m[router route={route} conf={decision.confidence:.2f} "
-                        f"reason={decision.reason} rewritten=no]\033[0m"
-                    )
+                self._print_route_trace(route, decision, False)
                 return response, speak
 
         return None, None
+
+    def _print_route_trace(self, route: str, decision, rewritten_changed: bool):
+        self.last_route = route
+        self._record_runtime_event(
+            "route",
+            f"Route selected: {route}",
+            severity="low",
+            route=route,
+            state=self._get_runtime_state(),
+        )
+        if not self.route_trace_enabled:
+            return
+        line = (
+            f"\033[90m[route={route} conf={decision.confidence:.2f} "
+            f"reason={decision.reason} rewritten={'yes' if rewritten_changed else 'no'}]\033[0m"
+        )
+        print(line)
+
+    def _set_runtime_state(self, state: str, detail: str = ""):
+        with self.runtime_state_lock:
+            self.runtime_state = state
+            self.runtime_state_detail = (detail or "").strip()
+
+    def _get_runtime_state(self) -> str:
+        with self.runtime_state_lock:
+            return self.runtime_state
+
+    def _record_runtime_event(
+        self,
+        event_type: str,
+        summary: str,
+        severity: str = "low",
+        route: str = "",
+        state: str = "",
+    ):
+        event = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "type": str(event_type or "event").strip(),
+            "summary": str(summary or "").strip(),
+            "severity": str(severity or "low").strip(),
+        }
+        if route:
+            event["route"] = route
+        if state:
+            event["state"] = state
+        self.runtime_events.append(event)
+
+    def _permission_warnings(self) -> list:
+        warnings = []
+        if not VOICE_AVAILABLE:
+            warnings.append("Voice input dependency unavailable. Install speechrecognition to enable microphone capture.")
+        if not TTS_AVAILABLE:
+            warnings.append("Voice output dependency unavailable. Install edge-tts or pyttsx3 for speech playback.")
+        if sys.platform == "darwin":
+            if pyautogui is None:
+                warnings.append("pyautogui is unavailable. Accessibility-driven control will be limited until pyautogui is installed.")
+            warnings.append("macOS permissions must be granted for Microphone, Accessibility, Screen Recording, and Notifications.")
+        return warnings
+
+    def get_recent_events(self, limit: int = 20) -> list:
+        count = max(1, min(int(limit), 100))
+        return list(self.runtime_events)[-count:]
+
+    def get_runtime_status(self) -> dict:
+        with self.runtime_state_lock:
+            state = self.runtime_state
+            detail = self.runtime_state_detail
+        vision_status = self.screen_vision_skill._status_text()
+        return {
+            "state": state,
+            "detail": detail,
+            "active_llm": self.active_llm,
+            "llm_mode": self.llm_provider,
+            "tts_provider_mode": self.tts_provider_mode,
+            "voice_available": bool(VOICE_AVAILABLE),
+            "tts_available": bool(TTS_AVAILABLE),
+            "is_speaking": bool(self.is_speaking),
+            "last_route": self.last_route,
+            "last_user_command": self.last_user_command,
+            "last_response": self.last_response,
+            "vision_running": "running" in vision_status,
+            "vision_status": vision_status,
+            "current_monitor_goal": getattr(self.screen_vision_skill, "_goal", ""),
+            "permission_warnings": self._permission_warnings(),
+            "skills": ["app", "search", "coding", "computer", "vision", "agentic"],
+            "events_count": len(self.runtime_events),
+        }
 
     def _call_llm(
         self,
@@ -900,6 +1054,7 @@ class Calcie:
         enable_web_grounding: bool = False,
         max_output_tokens: int = None,
         forced_provider: str = None,
+        forced_model: str = None,
     ):
         """Streaming request to LLM with env-driven provider selection."""
         provider_mode = (forced_provider or self.llm_provider or "auto").strip().lower()
@@ -956,7 +1111,10 @@ class Calcie:
                         max_output_tokens=max_output_tokens,
                     )
                 else:
-                    token_stream = call_fn(messages)
+                    if name == "ollama":
+                        token_stream = call_fn(messages, forced_model=forced_model)
+                    else:
+                        token_stream = call_fn(messages)
                 for token in token_stream:
                     yielded_any = True
                     yield token
@@ -1109,11 +1267,12 @@ class Calcie:
             if content:
                 yield content
 
-    def _call_ollama(self, messages: list):
+    def _call_ollama(self, messages: list, forced_model: str = None):
         """Call local Ollama as final fallback."""
         url = f"{self.ollama_url}/api/chat"
+        model_name = (forced_model or self.model or "llama3:8b").strip()
         payload = {
-            "model": self.model,
+            "model": model_name,
             "messages": messages,
             "stream": True
         }
@@ -1134,9 +1293,194 @@ class Calcie:
                     if chunk.get("done"):
                         break
 
+    def _extract_json_dict(self, text: str) -> dict:
+        raw = (text or "").strip()
+        if not raw:
+            return {}
+        fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", raw, flags=re.DOTALL | re.IGNORECASE)
+        if fence:
+            raw = fence.group(1)
+        else:
+            obj = re.search(r"(\{.*\})", raw, flags=re.DOTALL)
+            if obj:
+                raw = obj.group(1)
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _notify_screen_vision_alert(self, message: str) -> None:
+        text = (message or "").strip()
+        if not text:
+            return
+        print(f"\033[95m[Vision]\033[0m {text}")
+        self._record_runtime_event("alert", text, severity="medium", route="vision", state="vision_monitoring")
+        desktop_notify = self._env_bool("CALCIE_SCREEN_VISION_DESKTOP_NOTIFY", True)
+        if desktop_notify and sys.platform == "darwin":
+            safe_text = text.replace('"', "'")
+            try:
+                subprocess.run(
+                    ["osascript", "-e", f'display notification "{safe_text}" with title "CALCIE Vision"'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            except Exception:
+                pass
+        self.speak(text)
+
+    def _execute_screen_vision_action(self, command: str) -> str:
+        raw = (command or "").strip()
+        if not raw:
+            return "No action command provided."
+        response, _ = self._dispatch_skill_command(raw)
+        if response is None:
+            return "No matching CALCIE skill could execute that vision action."
+        return response
+
+    def _analyze_screen_snapshot(self, image_path: str, goal: str) -> dict:
+        provider = (os.environ.get("CALCIE_VISION_PROVIDER") or "auto").strip().lower()
+        if provider not in {"auto", "gemini", "openai", "claude"}:
+            provider = "auto"
+
+        provider_plan = []
+        if provider == "auto":
+            if GEMINI_AVAILABLE and self.gemini_key:
+                provider_plan.append("gemini")
+            if OPENAI_AVAILABLE and self.openai_key:
+                provider_plan.append("openai")
+            if ANTHROPIC_AVAILABLE and self.anthropic_key:
+                provider_plan.append("claude")
+        else:
+            provider_plan.append(provider)
+
+        last_error = None
+        for name in provider_plan:
+            try:
+                if name == "gemini":
+                    result = self._analyze_screen_snapshot_gemini(image_path, goal)
+                elif name == "openai":
+                    result = self._analyze_screen_snapshot_openai(image_path, goal)
+                else:
+                    result = self._analyze_screen_snapshot_claude(image_path, goal)
+                if result:
+                    return result
+            except Exception as exc:
+                last_error = exc
+                continue
+
+        return {
+            "matched": False,
+            "severity": "medium",
+            "summary": f"Screen vision analysis unavailable: {last_error or 'no provider configured'}",
+            "alert_message": "",
+            "should_act": False,
+            "action_command": "",
+            "evidence": [],
+        }
+
+    def _vision_goal_prompt(self, goal: str) -> str:
+        return (
+            f"{VISION_ANALYSIS_PROMPT}\n\n"
+            f"Monitoring goal: {goal}\n"
+            "Compare the screenshot against this goal only. "
+            "If the screenshot does not strongly match the goal, return matched=false."
+        )
+
+    def _analyze_screen_snapshot_gemini(self, image_path: str, goal: str) -> dict:
+        if not (GEMINI_AVAILABLE and self.gemini_key and Image is not None):
+            raise Exception("Gemini vision not configured")
+        genai.configure(api_key=self.gemini_key)
+        model_name = (os.environ.get("CALCIE_VISION_MODEL") or "gemini-2.5-flash").strip()
+        model = genai.GenerativeModel(model_name, system_instruction=VISION_ANALYSIS_PROMPT)
+        with Image.open(image_path) as img:
+            response = model.generate_content(
+                [
+                    f"Monitoring goal: {goal}\nReturn strict JSON only.",
+                    img,
+                ],
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=500,
+                    temperature=0.2,
+                ),
+            )
+        return self._extract_json_dict(getattr(response, "text", "") or "")
+
+    def _analyze_screen_snapshot_openai(self, image_path: str, goal: str) -> dict:
+        if not (OPENAI_AVAILABLE and self.openai_key):
+            raise Exception("OpenAI vision not configured")
+        model_name = (os.environ.get("CALCIE_VISION_OPENAI_MODEL") or "gpt-4.1-mini").strip()
+        with open(image_path, "rb") as fh:
+            b64 = base64.b64encode(fh.read()).decode("ascii")
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": VISION_ANALYSIS_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": f"Monitoring goal: {goal}\nReturn strict JSON only."},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    ],
+                },
+            ],
+            "max_tokens": 500,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.openai_key}",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=90) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        text = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return self._extract_json_dict(text)
+
+    def _analyze_screen_snapshot_claude(self, image_path: str, goal: str) -> dict:
+        if not (ANTHROPIC_AVAILABLE and self.anthropic_key):
+            raise Exception("Claude vision not configured")
+        client = Anthropic(api_key=self.anthropic_key)
+        with open(image_path, "rb") as fh:
+            b64 = base64.b64encode(fh.read()).decode("ascii")
+        response = client.messages.create(
+            model=(os.environ.get("CALCIE_VISION_CLAUDE_MODEL") or "claude-sonnet-4-20250514").strip(),
+            max_tokens=500,
+            system=VISION_ANALYSIS_PROMPT,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": f"Monitoring goal: {goal}\nReturn strict JSON only."},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": b64,
+                            },
+                        },
+                    ],
+                }
+            ],
+        )
+        text = ""
+        for block in getattr(response, "content", []) or []:
+            if getattr(block, "type", "") == "text":
+                text += getattr(block, "text", "")
+        return self._extract_json_dict(text)
+
     def chat(self, user_input: str) -> str:
         """Process user input with streaming and parallel TTS."""
         self._cancel_pending_ack_speech()
+        user_input = self._strip_leading_wake_invocation(user_input)
+        self.last_user_command = user_input
+        self._set_runtime_state("thinking", "Processing command")
+        self._record_runtime_event("command", f"Command received: {user_input}", severity="low", state="thinking")
         routed_response, local_input = self._maybe_route_cross_device_command(user_input)
         if routed_response is not None:
             print(f"\033[94mCalcie:\033[0m {routed_response}")
@@ -1145,6 +1489,9 @@ class Calcie:
             self._save_to_db("user", user_input)
             self.conversation_history.append({"role": "assistant", "content": routed_response})
             self._save_to_db("assistant", routed_response)
+            self.last_response = routed_response
+            self._record_runtime_event("response", "Cross-device response generated", severity="low", route="cross_device", state="idle")
+            self._set_runtime_state("idle", "Ready")
             return routed_response
 
         user_input = local_input
@@ -1180,6 +1527,9 @@ class Calcie:
                 self._speak_with_bridge(request_kind, to_speak, preempt=True)
             self.conversation_history.append({"role": "assistant", "content": skill_response})
             self._save_to_db("assistant", skill_response)
+            self.last_response = skill_response
+            self._record_runtime_event("response", "Skill response generated", severity="low", route=self.last_route or route_guess, state="idle")
+            self._set_runtime_state("idle", "Ready")
             return skill_response
 
         if profile_query:
@@ -1189,6 +1539,9 @@ class Calcie:
                 self._speak_with_bridge("profile", local_profile_answer, preempt=True)
                 self.conversation_history.append({"role": "assistant", "content": local_profile_answer})
                 self._save_to_db("assistant", local_profile_answer)
+                self.last_response = local_profile_answer
+                self._record_runtime_event("response", "Profile response generated", severity="low", route="profile", state="idle")
+                self._set_runtime_state("idle", "Ready")
                 return local_profile_answer
 
         if self.use_external_web_tools and direct_search_query:
@@ -1218,6 +1571,9 @@ class Calcie:
             self._speak_with_bridge("search", final_text, preempt=True)
             self.conversation_history.append({"role": "assistant", "content": final_text})
             self._save_to_db("assistant", final_text)
+            self.last_response = final_text
+            self._record_runtime_event("response", "Web-grounded response generated", severity="low", route="search", state="idle")
+            self._set_runtime_state("idle", "Ready")
             return final_text
 
         if input_type == "GREETING":
@@ -1226,6 +1582,9 @@ class Calcie:
             self.speak(final_text)
             self.conversation_history.append({"role": "assistant", "content": final_text})
             self._save_to_db("assistant", final_text)
+            self.last_response = final_text
+            self._record_runtime_event("response", "Greeting response generated", severity="low", route="general", state="idle")
+            self._set_runtime_state("idle", "Ready")
             return final_text
 
         history_limit = self._history_limit_for_request(
@@ -1332,6 +1691,9 @@ class Calcie:
         # Save to history
         self.conversation_history.append({"role": "assistant", "content": final_text})
         self._save_to_db("assistant", final_text)
+        self.last_response = final_text
+        self._record_runtime_event("response", "LLM response generated", severity="low", route=route_guess or "general", state="idle")
+        self._set_runtime_state("idle", "Ready")
 
         return final_text
 
@@ -1514,10 +1876,13 @@ class Calcie:
             text = self.speech_queue.get()
             self.is_speaking = True
             if text:
+                self._set_runtime_state("speaking", "Speaking response")
                 self._speak_sync(text)
             self.speech_queue.task_done()
             if self.speech_queue.empty():
                 self.is_speaking = False
+                if self._get_runtime_state() == "speaking":
+                    self._set_runtime_state("idle", "Ready")
 
     def _clear_speech_queue(self):
         """Drop queued (not-yet-spoken) TTS chunks to reduce stale speech lag."""
@@ -1974,6 +2339,57 @@ class Calcie:
             intent_triggers=self.INTENT_TRIGGERS,
             hook_similarity_threshold=self.HOOK_SIMILARITY_THRESHOLD,
         )
+
+    def _extract_inline_command_after_wake(self, transcript: str) -> str:
+        """Extract same-utterance command from wake transcript, if present."""
+        raw = (transcript or "").strip()
+        if not raw:
+            return ""
+
+        cleaned = raw.lower()
+        # Remove all known wake words/names.
+        for wake in sorted(self.WAKE_WORDS, key=len, reverse=True):
+            pattern = r"\b" + re.escape(wake.lower()) + r"\b"
+            cleaned = re.sub(pattern, " ", cleaned)
+
+        # Remove common conversational fillers around wake phrases.
+        cleaned = re.sub(r"\b(hey|hi|hello|yo|ok|okay|please|uh|um)\b", " ", cleaned)
+        cleaned = re.sub(r"[^a-z0-9\s]", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        if len(cleaned) < 2:
+            return ""
+        return cleaned
+
+    def _strip_leading_wake_invocation(self, user_input: str) -> str:
+        """
+        Normalize utterances like:
+        - "calcie open youtube"
+        - "hey calcie play music"
+        so command parsers receive "open youtube"/"play music".
+        """
+        raw = (user_input or "").strip()
+        if not raw:
+            return raw
+
+        lowered = raw.lower()
+        wake_sorted = sorted(self.WAKE_WORDS, key=len, reverse=True)
+        lead_tokens = ("hey", "hi", "hello", "yo", "ok", "okay", "please")
+
+        for wake in wake_sorted:
+            wake_l = wake.lower().strip()
+            if not wake_l:
+                continue
+
+            candidates = [wake_l] + [f"{prefix} {wake_l}" for prefix in lead_tokens]
+            for candidate in candidates:
+                if not lowered.startswith(candidate):
+                    continue
+                remainder = raw[len(candidate):].strip(" ,:-.?!")
+                if not remainder:
+                    return raw
+                return remainder
+        return raw
 
     def _limit_words(self, text: str, max_words: int) -> str:
         return core_limit_words(text, max_words)
@@ -2457,19 +2873,24 @@ class Calcie:
             return input_queue.get()  # Block until text is typed
 
         recognizer = sr.Recognizer()
+        recognizer.pause_threshold = 1.05
+        recognizer.non_speaking_duration = 0.55
+        recognizer.phrase_threshold = 0.2
         wake_queue = queue.Queue()
 
         def callback(rec, audio):
             try:
-                text = rec.recognize_google(audio).lower()
-                is_wake, reason, similarity, intent = self._activation_signal(text)
+                heard_text = rec.recognize_google(audio).strip()
+                lowered = heard_text.lower()
+                is_wake, reason, similarity, intent = self._activation_signal(lowered)
 
                 if is_wake:
-                    wake_queue.put(("voice", ""))
+                    inline_command = self._extract_inline_command_after_wake(heard_text)
+                    wake_queue.put(("voice", inline_command))
                 else:
                     # Helpful debug indicator so user sees what it heard instead of silently failing
                     sys.stdout.write(
-                        f"\033[90m(Heard: '{text}' | score={similarity:.2f} intent={intent or '-'} reason={reason})\033[0m"
+                        f"\033[90m(Heard: '{lowered}' | score={similarity:.2f} intent={intent or '-'} reason={reason})\033[0m"
                         + " " * 8
                         + "\r"
                     )
@@ -2489,7 +2910,11 @@ class Calcie:
             sys.stdout.flush()
 
             # Start background listener thread
-            stop_listening = recognizer.listen_in_background(source, callback, phrase_time_limit=3)
+            stop_listening = recognizer.listen_in_background(
+                source,
+                callback,
+                phrase_time_limit=float(self.wake_phrase_time_limit_s),
+            )
             try:
                 while True:
                     # 1. Check if user typed anything
@@ -2511,7 +2936,7 @@ class Calcie:
                         if msg_type == "voice":
                             print(" " * 80, end="\r")
                             print("\033[92mWake word detected!\033[0m")
-                            return ("voice", "")
+                            return ("voice", content or "")
                     except queue.Empty:
                         pass
 
@@ -2535,14 +2960,22 @@ class Calcie:
             return ""
 
         recognizer = sr.Recognizer()
+        recognizer.pause_threshold = 1.05
+        recognizer.non_speaking_duration = 0.55
+        recognizer.phrase_threshold = 0.2
         self._set_native_stderr_suppressed(True)
+        self._set_runtime_state("listening", "Listening for voice input")
         try:
             with sr.Microphone() as source:
                 print("\033[94mCalcie:\033[0m I'm all ears...", end="\r")
                 recognizer.adjust_for_ambient_noise(source, duration=0.2)
 
                 # Keep listening until speech detected or timeout
-                audio = recognizer.listen(source, timeout=10, phrase_time_limit=8)
+                audio = recognizer.listen(
+                    source,
+                    timeout=float(self.voice_timeout_s),
+                    phrase_time_limit=float(self.voice_phrase_time_limit_s),
+                )
 
                 print(" " * 50, end="\r")
 
@@ -2550,6 +2983,7 @@ class Calcie:
                     text = recognizer.recognize_google(audio).strip()
                     if len(text) < 2:
                         print(" " * 50, end="\r")
+                        self._set_runtime_state("idle", "Ready")
                         return ""
 
                     print(" " * 50, end="\r")
@@ -2557,19 +2991,24 @@ class Calcie:
                     return text
                 except sr.UnknownValueError:
                     print(" " * 50, end="\r")
+                    self._set_runtime_state("idle", "Ready")
                     return ""
                 except sr.RequestError:
                     print(" " * 50, end="\r")
+                    self._set_runtime_state("error", "Speech recognition request failed")
                     return ""
 
         except sr.WaitTimeoutError:
             print(" " * 50, end="\r")
+            self._set_runtime_state("idle", "Ready")
             return ""
         except OSError:
             print(" " * 50, end="\r")
+            self._set_runtime_state("needs_permission", "Microphone unavailable")
             return ""
         except Exception:
             print(" " * 50, end="\r")
+            self._set_runtime_state("error", "Voice capture failed")
             return ""
         finally:
             self._set_native_stderr_suppressed(False)
@@ -2656,10 +3095,18 @@ def main():
                     user_input = content
                     state = "ACTIVE_LISTEN" # Switch back to voice after handling
                 elif result_type == "voice":
-                    user_input = calcie.listen_voice()
-                    if not user_input or not user_input.strip():
-                        state = "TYPE_MODE"
-                        continue
+                    calcie._handle_wake_ack()
+                    # If command came in same wake utterance (e.g. "calcie open youtube"),
+                    # execute it directly without forcing a second speech turn.
+                    inline_command = (content or "").strip()
+                    if inline_command:
+                        user_input = inline_command
+                        print(f"\033[92mYou:\033[0m {user_input}")
+                    else:
+                        user_input = calcie.listen_voice()
+                        if not user_input or not user_input.strip():
+                            state = "TYPE_MODE"
+                            continue
                     state = "ACTIVE_LISTEN" # Switched back to active voice
                 else: 
                      # Error or unsupported
