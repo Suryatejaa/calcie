@@ -73,7 +73,7 @@ async function getResumeText() {
     const file = bucket.file('resume.pdf');
     const [exists] = await file.exists();
     if (!exists) return null;
-    
+
     const [buffer] = await file.download();
     const pdfParse = require('pdf-parse');
     const data = await pdfParse(buffer);
@@ -431,7 +431,7 @@ app.post('/api/resume/upload', upload.single('resume'), async (req, res) => {
     await file.save(req.file.buffer, {
       metadata: { contentType: req.file.mimetype }
     });
-    
+
     res.json({
       success: true,
       filename: req.file.originalname,
@@ -504,7 +504,7 @@ app.post('/api/applications', async (req, res) => {
     if (doc.exists) {
       return res.status(409).json({ error: 'Already applied to this job' });
     }
-    
+
     const appData = {
       jobId,
       title,
@@ -515,13 +515,13 @@ app.post('/api/applications', async (req, res) => {
       appliedAt: new Date().toISOString(),
       status: 'applied',
     };
-    
+
     await docRef.set(appData);
-    
+
     // Get total count
     const snapshot = await db.collection('applications').count().get();
     const total = snapshot.data().count;
-    
+
     res.json({ success: true, application: appData, total });
   } catch (err) {
     res.status(500).json({ error: 'Failed to save application', message: err.message });

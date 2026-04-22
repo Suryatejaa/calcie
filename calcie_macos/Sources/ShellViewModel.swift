@@ -14,6 +14,17 @@ struct NativePermissionStatus: Identifiable {
     var id: String { name }
 }
 
+struct ChatMessage: Identifiable {
+    let id = UUID()
+    let role: String
+    let text: String
+    let timestamp: Date
+
+    var isUser: Bool {
+        role == "user"
+    }
+}
+
 private struct ShellWindowSnapshot: Encodable {
     let visible: Bool
     let frame: ShellWindowFrame?
@@ -59,6 +70,27 @@ private struct AppBundleRuntimeConfig: Decodable {
     let code_signing_identity: String?
     let built_at: String?
     let repo_backed: Bool?
+    let cloud_base_url: String?
+    let release_channel: String?
+}
+
+private struct UpdateManifestEnvelope: Decodable {
+    let ok: Bool
+    let update_available: Bool
+    let release: UpdateRelease?
+}
+
+private struct UpdateRelease: Decodable {
+    let platform: String
+    let channel: String
+    let version: String
+    let build: String
+    let download_url: String
+    let sha256: String
+    let release_notes_url: String
+    let minimum_os: String
+    let required: Bool
+    let created_at: String
 }
 
 @MainActor
@@ -88,6 +120,22 @@ final class ShellViewModel: ObservableObject {
     @Published var runtimeRestartInFlight = false
     @Published var appBundleSummary = ""
     @Published var appBundleWarning = ""
+    @Published var chatInput = ""
+    @Published var chatMessages: [ChatMessage] = []
+    @Published var profileImportPrompt = "Return everything you know about me inside one fenced code block. Include long-term memory, bio details, and any model-set context you have with dates when available. I want a thorough memory export of what you've learned about me. Skip tool details and include only information that is actually about me. Be exhaustive and careful."
+    @Published var profileImportText = ""
+    @Published var profileImportMessage = "No ChatGPT memory import yet."
+    @Published var profileImportInFlight = false
+    @Published var hasChatGPTProfileImport = false
+    @Published var profileImportChars = 0
+    @Published var updateStatusMessage = "Update check has not run yet."
+    @Published var updateAvailable = false
+    @Published var updateVersion = ""
+    @Published var updateBuild = ""
+    @Published var updateDownloadURL = ""
+    @Published var updateReleaseNotesURL = ""
+    @Published var updateRequired = false
+    @Published var updateCheckInFlight = false
 
     private let client = LocalAPIClient()
     private var pollTimer: Timer?
@@ -100,11 +148,14 @@ final class ShellViewModel: ObservableObject {
     private let shellControlRequestPath: URL
     private let shellStatusPath: URL
     private let mediaPlayerCommandPath: URL
+    private let cloudBaseURL: String
+    private let releaseChannel: String
     private weak var panelWindow: NSWindow?
     private var lastHandledControlRequestId = ""
     private var lastHandledMediaCommandId = ""
     private var suppressWindowSnapshotsUntil = Date.distantPast
     private var runtimeInstanceID = ""
+    private var lastChatRuntimeResponse = ""
     var dismissPanelHandler: (() -> Void)?
     var openAdvancedOptionsHandler: (() -> Void)?
     var mediaPlayerCommandHandler: ((MediaPlayerCommandRequest) -> Void)?
@@ -121,9 +172,18 @@ final class ShellViewModel: ObservableObject {
             .appendingPathComponent(".calcie/runtime/macos_shell_status.json")
         self.mediaPlayerCommandPath = URL(fileURLWithPath: self.repoRoot)
             .appendingPathComponent(".calcie/runtime/media_player_command.json")
+        self.cloudBaseURL = Self.discoverCloudBaseURL(config: self.appBundleConfig)
+        self.releaseChannel = Self.discoverReleaseChannel(config: self.appBundleConfig)
         self.appLocationMessage = Self.describeAppLocation(bundlePath: self.bundlePath)
         self.appBundleSummary = Self.describeAppBundle(config: self.appBundleConfig, repoRoot: self.repoRoot)
         self.appBundleWarning = Self.appBundleWarning(config: self.appBundleConfig, repoRoot: self.repoRoot)
+        self.chatMessages = [
+            ChatMessage(
+                role: "assistant",
+                text: "Ask CALCIE anything, or use hold-to-talk. I’ll keep the latest responses here in case you miss the audio.",
+                timestamp: Date()
+            )
+        ]
     }
 
     func start() {
@@ -174,6 +234,15 @@ final class ShellViewModel: ObservableObject {
                 recentEvents = []
             }
         }
+        await refreshUpdateStatusIfNeeded()
+    }
+
+    func refreshProfileImportStatus() async {
+        do {
+            applyProfileImportStatus(try await client.profileImportStatus())
+        } catch {
+            profileImportMessage = "Profile import status unavailable: \(error.localizedDescription)"
+        }
     }
 
     func ensureRuntime() async {
@@ -204,13 +273,41 @@ final class ShellViewModel: ObservableObject {
     func submitTypedCommand() {
         let command = typedCommand.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty, !isSubmittingCommand else { return }
+        typedCommand = ""
+        submitCommand(command, addToChat: false)
+    }
+
+    func submitChatMessage() {
+        let command = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty, !isSubmittingCommand else { return }
+        chatInput = ""
+        submitCommand(command, addToChat: true)
+    }
+
+    func clearChat() {
+        chatMessages = [
+            ChatMessage(
+                role: "assistant",
+                text: "Cleared. Ask a follow-up whenever you’re ready.",
+                timestamp: Date()
+            )
+        ]
+        lastChatRuntimeResponse = ""
+        commandError = ""
+    }
+
+    private func submitCommand(_ command: String, addToChat: Bool) {
+        guard !command.isEmpty, !isSubmittingCommand else { return }
         isSubmittingCommand = true
         commandError = ""
         lastResponse = "Working on: \(command)"
         lastRoute = "-"
         runtimeState = "thinking"
         runtimeDetail = "Sending command to CALCIE..."
-        typedCommand = ""
+        if addToChat {
+            appendChatMessage(role: "user", text: command)
+            appendChatMessage(role: "assistant", text: "Thinking...")
+        }
         Task {
             defer { isSubmittingCommand = false }
             do {
@@ -221,6 +318,10 @@ final class ShellViewModel: ObservableObject {
                     lastRoute = route
                 }
                 lastResponse = response.response
+                if addToChat {
+                    replaceLastThinkingMessage(with: response.response)
+                    lastChatRuntimeResponse = response.response
+                }
                 if !response.ok {
                     commandError = response.response
                 }
@@ -231,6 +332,10 @@ final class ShellViewModel: ObservableObject {
                 commandError = message
                 runtimeState = "error"
                 runtimeDetail = error.localizedDescription
+                if addToChat {
+                    replaceLastThinkingMessage(with: message)
+                    lastChatRuntimeResponse = message
+                }
             }
         }
     }
@@ -351,6 +456,82 @@ final class ShellViewModel: ObservableObject {
 
     func openProjectRoot() {
         NSWorkspace.shared.open(URL(fileURLWithPath: repoRoot))
+    }
+
+    func refreshUpdateStatus() async {
+        guard !updateCheckInFlight else { return }
+        let base = cloudBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty, let baseURL = URL(string: base) else {
+            updateStatusMessage = "Update check is not configured. Set CALCIE_CLOUD_BASE_URL or CALCIE_SYNC_BASE_URL before building."
+            updateAvailable = false
+            return
+        }
+
+        updateCheckInFlight = true
+        defer { updateCheckInFlight = false }
+
+        var components = URLComponents(url: baseURL.appendingPathComponent("updates/latest"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "platform", value: "macos"),
+            URLQueryItem(name: "channel", value: releaseChannel),
+        ]
+        guard let url = components?.url else {
+            updateStatusMessage = "Could not build update check URL."
+            updateAvailable = false
+            return
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                updateStatusMessage = "Update check failed with HTTP \(http.statusCode)."
+                updateAvailable = false
+                return
+            }
+            let envelope = try JSONDecoder().decode(UpdateManifestEnvelope.self, from: data)
+            applyUpdateManifest(envelope)
+        } catch {
+            updateStatusMessage = "Update check failed: \(error.localizedDescription)"
+            updateAvailable = false
+        }
+    }
+
+    func openUpdateDownload() {
+        guard let url = URL(string: updateDownloadURL), !updateDownloadURL.isEmpty else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func openUpdateReleaseNotes() {
+        guard let url = URL(string: updateReleaseNotesURL), !updateReleaseNotesURL.isEmpty else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func copyProfileImportPrompt() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(profileImportPrompt, forType: .string)
+        profileImportMessage = "Prompt copied. Paste it into ChatGPT, then paste the fenced response here."
+    }
+
+    func importChatGPTProfile() {
+        let text = profileImportText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !profileImportInFlight else { return }
+        profileImportInFlight = true
+        profileImportMessage = "Importing ChatGPT memory export..."
+        Task {
+            defer { profileImportInFlight = false }
+            do {
+                let response = try await client.importChatGPTProfile(text: text)
+                profileImportMessage = response.response
+                hasChatGPTProfileImport = response.ok
+                profileImportChars = response.imported_chars ?? profileImportChars
+                if response.ok {
+                    profileImportText = ""
+                }
+                await refreshAll()
+            } catch {
+                profileImportMessage = "Import failed: \(error.localizedDescription)"
+            }
+        }
     }
 
     func openPrivacyPane(_ anchor: String) {
@@ -635,8 +816,15 @@ final class ShellViewModel: ObservableObject {
         if !status.current_monitor_goal.isEmpty {
             visionGoal = status.current_monitor_goal
         }
+        if let profileImport = status.profile_import {
+            applyProfileImportStatus(profileImport)
+        }
         if !status.last_response.isEmpty {
             commandError = ""
+            if status.last_response != lastChatRuntimeResponse {
+                appendChatMessage(role: "assistant", text: status.last_response)
+                lastChatRuntimeResponse = status.last_response
+            }
         }
         if matchesRoot {
             if let pid = status.runtime_pid {
@@ -646,6 +834,62 @@ final class ShellViewModel: ObservableObject {
             }
         } else {
             runtimeLaunchMessage = "This app expects runtime root \(repoRoot), but connected runtime root is \(status.runtime_project_root ?? "unknown")."
+        }
+    }
+
+    private func applyProfileImportStatus(_ status: ProfileImportStatus) {
+        profileImportPrompt = status.import_prompt
+        hasChatGPTProfileImport = status.has_chatgpt_import
+        profileImportChars = status.imported_chars
+        if status.has_chatgpt_import {
+            let when = status.imported_at.isEmpty ? "previously" : status.imported_at
+            profileImportMessage = "ChatGPT memory import loaded (\(status.imported_chars) chars, \(when))."
+        } else if status.has_profile {
+            profileImportMessage = "Profile template is present, but no ChatGPT memory import yet."
+        } else {
+            profileImportMessage = "No ChatGPT memory import yet."
+        }
+    }
+
+    private func refreshUpdateStatusIfNeeded() async {
+        if updateCheckInFlight {
+            return
+        }
+        if updateStatusMessage == "Update check has not run yet." {
+            await refreshUpdateStatus()
+        }
+    }
+
+    private func applyUpdateManifest(_ envelope: UpdateManifestEnvelope) {
+        guard envelope.ok else {
+            updateAvailable = false
+            updateStatusMessage = "Update service returned an error."
+            return
+        }
+        guard envelope.update_available, let release = envelope.release else {
+            updateAvailable = false
+            updateStatusMessage = "CALCIE is up to date on \(releaseChannel)."
+            return
+        }
+
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        let currentBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+        updateVersion = release.version
+        updateBuild = release.build
+        updateDownloadURL = release.download_url
+        updateReleaseNotesURL = release.release_notes_url
+        updateRequired = release.required
+        updateAvailable = Self.releaseIsNewer(
+            remoteVersion: release.version,
+            remoteBuild: release.build,
+            currentVersion: currentVersion,
+            currentBuild: currentBuild
+        )
+        if updateAvailable {
+            let requiredText = release.required ? " Required update." : ""
+            updateStatusMessage = "CALCIE \(release.version) build \(release.build) is available on \(release.channel).\(requiredText)"
+        } else {
+            updateStatusMessage = "No newer update on \(release.channel). Current: \(currentVersion) build \(currentBuild)."
         }
     }
 
@@ -852,12 +1096,41 @@ final class ShellViewModel: ObservableObject {
         return try? JSONDecoder().decode(AppBundleRuntimeConfig.self, from: data)
     }
 
+    private static func discoverCloudBaseURL(config: AppBundleRuntimeConfig?) -> String {
+        if let configured = ProcessInfo.processInfo.environment["CALCIE_CLOUD_BASE_URL"],
+           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return configured
+        }
+        if let configured = ProcessInfo.processInfo.environment["CALCIE_SYNC_BASE_URL"],
+           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return configured
+        }
+        if let configured = config?.cloud_base_url?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !configured.isEmpty {
+            return configured
+        }
+        return "https://calcie.onrender.com"
+    }
+
+    private static func discoverReleaseChannel(config: AppBundleRuntimeConfig?) -> String {
+        if let configured = ProcessInfo.processInfo.environment["CALCIE_RELEASE_CHANNEL"],
+           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return configured
+        }
+        if let configured = config?.release_channel?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !configured.isEmpty {
+            return configured
+        }
+        return "alpha"
+    }
+
     private static func describeAppBundle(config: AppBundleRuntimeConfig?, repoRoot: String) -> String {
         let buildConfiguration = config?.build_configuration ?? "unknown"
         let signingStyle = (config?.code_signing_style ?? "unknown").uppercased()
         let builtAt = config?.built_at ?? "unknown"
         let repoBacked = (config?.repo_backed ?? true) ? "repo-backed" : "bundled runtime"
-        return "Build: \(buildConfiguration) · signing \(signingStyle) · built \(builtAt) · \(repoBacked) · root \(repoRoot)"
+        let channel = config?.release_channel ?? "alpha"
+        return "Build: \(buildConfiguration) · signing \(signingStyle) · built \(builtAt) · \(repoBacked) · channel \(channel) · root \(repoRoot)"
     }
 
     private static func appBundleWarning(config: AppBundleRuntimeConfig?, repoRoot: String) -> String {
@@ -872,5 +1145,46 @@ final class ShellViewModel: ObservableObject {
             return "This build is ad-hoc signed. macOS privacy permissions can reset after reinstall until CALCIE.app is signed with a stable identity."
         }
         return ""
+    }
+
+    private static func releaseIsNewer(
+        remoteVersion: String,
+        remoteBuild: String,
+        currentVersion: String,
+        currentBuild: String
+    ) -> Bool {
+        let remoteParts = versionParts(remoteVersion)
+        let currentParts = versionParts(currentVersion)
+        for index in 0..<max(remoteParts.count, currentParts.count) {
+            let remote = index < remoteParts.count ? remoteParts[index] : 0
+            let current = index < currentParts.count ? currentParts[index] : 0
+            if remote > current { return true }
+            if remote < current { return false }
+        }
+        return (Int(remoteBuild) ?? 0) > (Int(currentBuild) ?? 0)
+    }
+
+    private static func versionParts(_ version: String) -> [Int] {
+        version
+            .split(separator: ".")
+            .map { Int($0.filter { $0.isNumber }) ?? 0 }
+    }
+
+    private func appendChatMessage(role: String, text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        chatMessages.append(ChatMessage(role: role, text: trimmed, timestamp: Date()))
+        if chatMessages.count > 30 {
+            chatMessages.removeFirst(chatMessages.count - 30)
+        }
+    }
+
+    private func replaceLastThinkingMessage(with text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if let last = chatMessages.last, !last.isUser, last.text == "Thinking..." {
+            chatMessages.removeLast()
+        }
+        appendChatMessage(role: "assistant", text: trimmed)
     }
 }

@@ -7,7 +7,7 @@ from typing import Dict, List
 
 
 GENERAL_CHAT_PROMPT = (
-    "You are CALCIE, Surya's AI companion. "
+    "You are CALCIE, the user's local AI companion. "
     "Be warm, direct, and practical. "
     "Answer the user's current request first. "
     "Do not drag unrelated older topics into new conversations. "
@@ -136,7 +136,7 @@ def build_profile_context(profile: Dict, facts: List[str], max_facts: int = 14) 
     lines: List[str] = []
     if profile:
         try:
-            rendered = json.dumps(profile, ensure_ascii=True)
+            rendered = json.dumps(_compact_profile_for_prompt(profile), ensure_ascii=True)
             lines.append(f"PROFILE_JSON: {rendered}")
         except Exception:
             pass
@@ -146,3 +146,17 @@ def build_profile_context(profile: Dict, facts: List[str], max_facts: int = 14) 
             lines.append("KNOWN_FACTS:")
             lines.extend(f"- {item}" for item in selected)
     return "\n".join(lines).strip()
+
+
+def _compact_profile_for_prompt(value, max_text_chars: int = 3000):
+    if isinstance(value, dict):
+        return {
+            str(key): _compact_profile_for_prompt(item, max_text_chars=max_text_chars)
+            for key, item in value.items()
+            if not str(key).startswith("_")
+        }
+    if isinstance(value, list):
+        return [_compact_profile_for_prompt(item, max_text_chars=max_text_chars) for item in value[:20]]
+    if isinstance(value, str) and len(value) > max_text_chars:
+        return value[:max_text_chars].rstrip() + " ... [truncated]"
+    return value

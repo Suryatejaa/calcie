@@ -26,17 +26,21 @@ class ScreenVisionSkill:
         analyze_image: Callable[[str, str], Dict],
         notify_user: Callable[[str], None],
         execute_action: Optional[Callable[[str], str]] = None,
+        memory_pipeline=None,
     ):
         self.project_root = Path(project_root)
         self.analyze_image = analyze_image
         self.notify_user = notify_user
         self.execute_action = execute_action
+        self.memory_pipeline = memory_pipeline
 
         self.enabled = self._env_bool("CALCIE_SCREEN_VISION_ENABLED", True)
         self.interval_s = self._env_int("CALCIE_SCREEN_VISION_INTERVAL_S", 12, 3, 300)
         self.keep_all_captures = self._env_bool("CALCIE_SCREEN_VISION_KEEP_ALL_CAPTURES", False)
         self.allow_actions = self._env_bool("CALCIE_SCREEN_VISION_ALLOW_ACTIONS", False)
         self.auto_hide_calcie_menu = self._env_bool("CALCIE_SCREEN_VISION_AUTO_HIDE_CALCIE_MENU", True)
+        self.memory_background_enabled = self._env_bool("CALCIE_SCREEN_MEMORY_BACKGROUND_ENABLED", True)
+        self.memory_keep_captures = self._env_bool("CALCIE_SCREEN_MEMORY_KEEP_CAPTURES", False)
         self.shell_state_max_age_s = float(
             (os.environ.get("CALCIE_SCREEN_VISION_SHELL_STATE_MAX_AGE_S") or "1.5").strip() or "1.5"
         )
@@ -53,12 +57,16 @@ class ScreenVisionSkill:
 
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._memory_stop_event = threading.Event()
         self._worker: Optional[threading.Thread] = None
+        self._memory_worker: Optional[threading.Thread] = None
         self._goal = ""
         self._running = False
+        self._memory_running = False
         self._last_result: Optional[Dict] = None
         self._events: List[Dict] = []
         self._last_alert_at = 0.0
+        self._start_memory_background_loop_if_enabled()
 
     def handle_command(self, user_input: str) -> Tuple[Optional[str], Optional[str]]:
         raw = (user_input or "").strip()
@@ -177,6 +185,10 @@ class ScreenVisionSkill:
             f"interval: {self.interval_s}s",
             f"actions: {'on' if self.allow_actions else 'off'}",
         ]
+        if self.memory_pipeline and getattr(self.memory_pipeline, "enabled", False):
+            memory_state = "running" if self._memory_running else "idle"
+            memory_interval = getattr(self.memory_pipeline, "min_interval_s", "?")
+            pieces.append(f"memory: {memory_state} every {memory_interval}s")
         if goal:
             pieces.append(f"goal: {goal}")
         if last_result:
@@ -230,6 +242,76 @@ class ScreenVisionSkill:
             return "Screen vision is already stopped.", "Screen vision already stopped."
         return "Screen vision stopped.", "Screen vision stopped."
 
+    def _start_memory_background_loop_if_enabled(self) -> None:
+        if not self.memory_pipeline:
+            return
+        if not getattr(self.memory_pipeline, "enabled", False):
+            return
+        if not self.memory_background_enabled:
+            return
+        self._memory_stop_event.clear()
+        self._memory_worker = threading.Thread(target=self._memory_loop, daemon=True)
+        with self._lock:
+            self._memory_running = True
+        self._memory_worker.start()
+
+    def _memory_loop(self) -> None:
+        while not self._memory_stop_event.is_set():
+            self._run_memory_capture_tick()
+            wait_seconds = max(10, int(getattr(self.memory_pipeline, "min_interval_s", 45) or 45))
+            for _ in range(wait_seconds):
+                if self._memory_stop_event.is_set():
+                    break
+                time.sleep(1)
+        with self._lock:
+            self._memory_running = False
+
+    def _run_memory_capture_tick(self) -> None:
+        ok, screenshot_path, error = self._capture_screenshot("memory")
+        if not ok or not screenshot_path:
+            self._record_event(
+                {
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "goal": "screen memory",
+                    "matched": False,
+                    "severity": "low",
+                    "summary": f"Screen memory capture skipped: {error}",
+                    "alert_message": "",
+                    "should_act": False,
+                    "action_command": "",
+                    "action_result": "",
+                    "evidence": [],
+                    "screenshot_path": "",
+                }
+            )
+            return
+        memory_result = self._maybe_record_screen_memory(str(screenshot_path), source="memory_loop")
+        if not self.memory_keep_captures:
+            try:
+                Path(screenshot_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        if memory_result and not memory_result.get("skipped"):
+            self._record_event(
+                {
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "goal": "screen memory",
+                    "matched": bool(memory_result.get("ok")),
+                    "severity": "low",
+                    "summary": (
+                        f"Screen memory saved {memory_result.get('saved', 0)} item(s)"
+                        f" from {memory_result.get('app_name') or 'unknown app'}."
+                    ),
+                    "alert_message": "",
+                    "should_act": False,
+                    "action_command": "",
+                    "action_result": "",
+                    "evidence": [],
+                    "screenshot_path": str(screenshot_path),
+                    "memory_result": dict(memory_result),
+                }
+            )
+
     def _monitor_loop(self) -> None:
         while not self._stop_event.is_set():
             with self._lock:
@@ -253,7 +335,9 @@ class ScreenVisionSkill:
             self._maybe_act(normalized)
         elif source == "loop" and not self.keep_all_captures:
             try:
-                Path(screenshot_path).unlink(missing_ok=True)
+                screenshot_path = str(normalized.get("screenshot_path") or "").strip()
+                if screenshot_path:
+                    Path(screenshot_path).unlink(missing_ok=True)
             except Exception:
                 pass
 
@@ -299,7 +383,26 @@ class ScreenVisionSkill:
                 "action_command": "",
             }
 
-        return self._normalize_result(result, goal, str(screenshot_path))
+        normalized = self._normalize_result(result, goal, str(screenshot_path))
+        self._maybe_record_screen_memory(str(screenshot_path), source=source)
+        return normalized
+
+    def _maybe_record_screen_memory(self, screenshot_path: str, source: str) -> Optional[Dict]:
+        if not self.memory_pipeline:
+            return None
+        try:
+            memory_result = self.memory_pipeline.maybe_process_screenshot(
+                screenshot_path=screenshot_path,
+                source=source,
+            )
+        except Exception as exc:
+            memory_result = {"ok": False, "reason": f"screen_memory_failed: {exc}"}
+        if not memory_result or memory_result.get("skipped"):
+            return memory_result
+        with self._lock:
+            if self._last_result is not None:
+                self._last_result["memory_result"] = dict(memory_result)
+        return memory_result
 
     def _capture_screenshot(self, label: str) -> Tuple[bool, Optional[Path], str]:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -10,12 +10,16 @@ __pycache__/
 # Database & memory files
 calcie_history.db
 calcie_facts.json
+calcie_profile.local.json
+context.local.json
 .calcie/
 
 # Temporary files
 *.tmp
 *.mp3
+.DS_Store
 sync_server.db
+indian-premier-league-2026-1PW.html
 
 # IDE
 .vscode/
@@ -32,4 +36,9 @@ mobile_v2/.env
 # Swift package build output
 calcie_macos/.build/
 calcie_macos/.swiftpm/
+calcie_macos/.swift-cache/
+calcie_macos/.swift-home/
 dist/
+
+# Local job-hunter dependencies
+job-hunter/node_modules/

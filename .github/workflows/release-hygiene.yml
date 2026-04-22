@@ -1,0 +1,14 @@
+name: Release Hygiene
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Check release hygiene
+        run: python3 scripts/check_release_hygiene.py

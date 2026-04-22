@@ -1,9 +1,10 @@
 {
-  "name": "Surya",
-  "location": "Hyderabad",
-  "job": "Infosys - software developer",
-  "devices": ["Pixel 9a", "MacBook M4", "Linux laptop"],
-  "projects": ["CALCIE", "Silicon Agents"],
-  "goals": ["escape 9-5", "build AI products", "indie founder"],
-  "personality_match": "sarcasm, dark humor, casual"
+  "name": "",
+  "location": "",
+  "job": "",
+  "devices": [],
+  "projects": [],
+  "goals": [],
+  "personality_match": "",
+  "_note": "Template only. Keep real user profile data in calcie_profile.local.json or import it during onboarding."
 }

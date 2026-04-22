@@ -26,6 +26,10 @@ class VisionRequest(BaseModel):
     goal: str = Field(min_length=1)
 
 
+class ProfileImportRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+
 class DesktopRuntime:
     def __init__(self):
         self.calcie = Calcie()
@@ -60,6 +64,7 @@ class DesktopRuntime:
         status = self.calcie.get_runtime_status()
         status["voice_session_active"] = bool(self._voice_thread and self._voice_thread.is_alive())
         status["voice_cancel_requested"] = bool(self._voice_cancel_requested)
+        status["profile_import"] = self.calcie.get_profile_import_status()
         status.update(self._runtime_metadata())
         return status
 
@@ -142,18 +147,17 @@ class DesktopRuntime:
         return {"ok": True, "response": "Voice capture started.", "state": "listening"}
 
     def stop_voice(self) -> Dict[str, Any]:
-        self._voice_cancel_requested = True
-        self.calcie._set_runtime_state("idle", "Ready")
+        self.calcie._set_runtime_state("listening", "Finishing current voice capture")
         self.calcie._record_runtime_event(
             "voice",
             "Voice stop requested. Current recognition pass will end naturally.",
             severity="low",
-            state="idle",
+            state="listening",
         )
         return {
             "ok": True,
             "response": "Voice stop requested. The current recognition pass will stop after the active listen cycle.",
-            "state": "idle",
+            "state": "listening",
         }
 
     def restart(self) -> Dict[str, Any]:
@@ -169,6 +173,20 @@ class DesktopRuntime:
             "response": "Runtime restart requested.",
             "state": "starting",
         }
+
+    def profile_import_status(self) -> Dict[str, Any]:
+        payload = {"ok": True}
+        payload.update(self.calcie.get_profile_import_status())
+        return payload
+
+    def import_chatgpt_profile(self, text: str) -> Dict[str, Any]:
+        try:
+            with self._lock:
+                result = self.calcie.import_chatgpt_memory_export(text)
+        except Exception as exc:
+            self.calcie._record_runtime_event("error", f"Profile import failed: {exc}", severity="high", state="error")
+            return {"ok": False, "response": f"Profile import failed: {exc}"}
+        return result
 
 
 runtime = DesktopRuntime()
@@ -226,6 +244,16 @@ def post_vision_stop():
 @app.post("/runtime/restart")
 def post_runtime_restart():
     return runtime.restart()
+
+
+@app.get("/profile/import-status")
+def get_profile_import_status():
+    return runtime.profile_import_status()
+
+
+@app.post("/profile/import-chatgpt")
+def post_profile_import_chatgpt(req: ProfileImportRequest):
+    return runtime.import_chatgpt_profile(req.text)
 
 
 def main():

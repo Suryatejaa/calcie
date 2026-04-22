@@ -22,7 +22,7 @@ Create `mobile_v2/.env` from `.env.example`:
 
 ```env
 EXPO_PUBLIC_CALCIE_API_BASE_URL=https://calcie.onrender.com
-EXPO_PUBLIC_CALCIE_USER_ID=surya
+EXPO_PUBLIC_CALCIE_USER_ID=local-user
 EXPO_PUBLIC_CALCIE_DEVICE_ID=mobile-v2
 EXPO_PUBLIC_CALCIE_DEVICE_TYPE=mobile
 EXPO_PUBLIC_CALCIE_LAPTOP_DEVICE_ID=laptop

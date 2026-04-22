@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CALCIE Privacy</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="../index.html"><span class="brand-mark">C</span><span>CALCIE</span></a></header>
+  <main class="doc-page">
+    <p class="eyebrow">Privacy</p>
+    <h1>Local-first by default</h1>
+    <p class="hero-text">CALCIE is designed so personal context, screen captures, local databases, and profile imports stay on your machine unless you explicitly enable a cloud feature.</p>
+
+    <section class="doc-card">
+      <h2>Local data</h2>
+      <ul>
+        <li><code>.calcie/</code> contains runtime state, vision captures, OCR, screen memory, and profile import backups.</li>
+        <li><code>calcie_profile.local.json</code> stores imported user profile context.</li>
+        <li><code>calcie_history.db</code> stores local chat history.</li>
+      </ul>
+    </section>
+
+    <section class="doc-card">
+      <h2>Release safety</h2>
+      <p>The release hygiene check blocks private files like <code>.env</code>, <code>.calcie</code>, OCR dumps, screenshots, local DBs, and profile imports from shipping.</p>
+    </section>
+
+    <section class="doc-card">
+      <h2>Cloud services</h2>
+      <p>The backend is used for optional device sync, update manifests, feedback, and crash reports. Raw screen memory and imported ChatGPT memory are not uploaded by default.</p>
+    </section>
+  </main>
+</body>
+</html>

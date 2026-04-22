@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CALCIE - Local-first AI companion for macOS</title>
+  <meta name="description" content="CALCIE is a local-first AI companion for macOS with voice, vision, app control, media, and safe desktop automation." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="CALCIE home">
+      <span class="brand-mark">C</span>
+      <span>CALCIE</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary navigation">
+      <a href="#features">Features</a>
+      <a href="docs/setup.html">Setup</a>
+      <a href="docs/privacy.html">Privacy</a>
+      <a href="releases/0.1.0.html">Release Notes</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">macOS alpha</p>
+        <h1>A local-first assistant that lives where your work happens.</h1>
+        <p class="hero-text">
+          CALCIE brings voice, screen vision, app control, media playback, live search, and safe agentic workflows into a native menu bar companion.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="#download">Download alpha</a>
+          <a class="button secondary" href="docs/setup.html">Read setup guide</a>
+        </div>
+        <p class="small-note">Alpha builds are for testers. CALCIE stays local-first and asks before risky actions.</p>
+      </div>
+      <div class="hero-card" aria-label="CALCIE app preview">
+        <div class="card-topline">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="assistant-panel">
+          <p class="panel-label">Ask CALCIE</p>
+          <div class="bubble user">check live IPL score</div>
+          <div class="bubble calcie">SRH are 242/2. DC are 67/1 after 7 overs. SRH are ahead, but the chase is still active.</div>
+          <div class="tool-row">
+            <span>Vision</span><span>Player</span><span>Updates</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="download" class="download-panel">
+      <div>
+        <p class="eyebrow">Download</p>
+        <h2>CALCIE for macOS</h2>
+        <p>Current alpha: <strong>0.1.0 build 1</strong>. Replace the placeholder URL below after uploading the signed DMG.</p>
+      </div>
+      <div class="download-actions">
+        <a class="button primary disabled" aria-disabled="true" href="#">DMG coming soon</a>
+        <a class="button secondary" href="releases/0.1.0.html">Release notes</a>
+      </div>
+    </section>
+
+    <section id="features" class="feature-grid">
+      <article>
+        <span class="feature-number">01</span>
+        <h3>Menu bar companion</h3>
+        <p>Ask follow-up questions, review responses you missed, open advanced tools, and manage runtime state from the menu bar.</p>
+      </article>
+      <article>
+        <span class="feature-number">02</span>
+        <h3>Voice + vision</h3>
+        <p>Hold Right Option to talk. Use screen vision for alert-first monitoring and local screen memory when explicitly enabled.</p>
+      </article>
+      <article>
+        <span class="feature-number">03</span>
+        <h3>CALCIE Player</h3>
+        <p>One reusable app-owned YouTube / YouTube Music surface, avoiding browser tab chaos while supporting media controls.</p>
+      </article>
+      <article>
+        <span class="feature-number">04</span>
+        <h3>Safe automation</h3>
+        <p>Desktop actions stay gated. Orders, payments, and destructive actions stop for confirmation instead of silently executing.</p>
+      </article>
+      <article>
+        <span class="feature-number">05</span>
+        <h3>Live utility skills</h3>
+        <p>Search, weather, jobs, sports scores, app launching, coding workflows, and browser handoffs route through the Python runtime.</p>
+      </article>
+      <article>
+        <span class="feature-number">06</span>
+        <h3>Update aware</h3>
+        <p>The app checks a backend manifest and shows available updates before automatic updates are introduced.</p>
+      </article>
+    </section>
+
+    <section class="docs-strip">
+      <a href="docs/setup.html">
+        <span>Setup</span>
+        <strong>Install, permissions, first-run memory import</strong>
+      </a>
+      <a href="docs/privacy.html">
+        <span>Privacy</span>
+        <strong>Local-first defaults and what never ships</strong>
+      </a>
+      <a href="releases/0.1.0.html">
+        <span>Release Notes</span>
+        <strong>Alpha 0.1.0 build 1 details</strong>
+      </a>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>CALCIE alpha</span>
+    <span>Local-first by default.</span>
+  </footer>
+  <script src="main.js"></script>
+</body>
+</html>

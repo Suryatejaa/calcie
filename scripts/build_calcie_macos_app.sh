@@ -17,6 +17,8 @@ SIGN_IDENTITY="${CALCIE_CODESIGN_IDENTITY:-}"
 SIGN_STYLE="ad-hoc"
 BUILD_TIME_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 SIGN_IDENTITY_JSON="null"
+CLOUD_BASE_URL="${CALCIE_CLOUD_BASE_URL:-${CALCIE_SYNC_BASE_URL:-https://calcie.onrender.com}}"
+RELEASE_CHANNEL="${CALCIE_RELEASE_CHANNEL:-alpha}"
 
 if [[ ! -f "${INFO_PLIST_SOURCE}" ]]; then
   echo "Missing Info.plist template at ${INFO_PLIST_SOURCE}" >&2
@@ -68,7 +70,9 @@ cat > "${CONFIG_PATH}" <<JSON
   "code_signing_style":"${SIGN_STYLE}",
   "code_signing_identity":${SIGN_IDENTITY_JSON},
   "built_at":"${BUILD_TIME_UTC}",
-  "repo_backed":true
+  "repo_backed":true,
+  "cloud_base_url":"${CLOUD_BASE_URL}",
+  "release_channel":"${RELEASE_CHANNEL}"
 }
 JSON
 

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,13 @@ class RegisterDeviceRequest(BaseModel):
     device_id: str = Field(min_length=1)
     device_type: str = Field(default="unknown")
     label: str = Field(default="")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class UpsertUserRequest(BaseModel):
+    user_id: str = Field(min_length=1)
+    display_name: str = Field(default="")
+    email: str = Field(default="")
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -55,6 +62,39 @@ class CommandAckRequest(BaseModel):
     status: str = Field(default="done")
 
 
+class ReleaseArtifactRequest(BaseModel):
+    platform: str = Field(min_length=1)
+    channel: str = Field(default="stable")
+    version: str = Field(min_length=1)
+    build: str = Field(default="")
+    download_url: str = Field(min_length=1)
+    sha256: str = Field(default="")
+    release_notes_url: str = Field(default="")
+    minimum_os: str = Field(default="")
+    required: bool = Field(default=False)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FeedbackRequest(BaseModel):
+    user_id: str = Field(default="")
+    device_id: str = Field(default="")
+    category: str = Field(default="general")
+    message: str = Field(min_length=1)
+    email: str = Field(default="")
+    app_version: str = Field(default="")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CrashReportRequest(BaseModel):
+    user_id: str = Field(default="")
+    device_id: str = Field(default="")
+    app_version: str = Field(default="")
+    crash_type: str = Field(default="unknown")
+    summary: str = Field(default="")
+    log: str = Field(default="")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class SyncStore:
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -70,6 +110,18 @@ class SyncStore:
     def _init_db(self):
         with self._connect() as conn:
             c = conn.cursor()
+            c.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
             c.execute(
                 """
                 CREATE TABLE IF NOT EXISTS devices (
@@ -120,7 +172,101 @@ class SyncStore:
                 )
                 """
             )
+            c.execute(
+                """
+                CREATE TABLE IF NOT EXISTS release_artifacts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    build TEXT NOT NULL,
+                    download_url TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    release_notes_url TEXT NOT NULL,
+                    minimum_os TEXT NOT NULL,
+                    required INTEGER NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    active INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            c.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_release_artifacts_latest
+                ON release_artifacts(platform, channel, active, id)
+                """
+            )
+            c.execute(
+                """
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    app_version TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            c.execute(
+                """
+                CREATE TABLE IF NOT EXISTS crash_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    app_version TEXT NOT NULL,
+                    crash_type TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    log TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
             conn.commit()
+
+    def upsert_user(self, req: UpsertUserRequest):
+        now = _utc_now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (user_id, display_name, email, metadata_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id)
+                DO UPDATE SET
+                    display_name=excluded.display_name,
+                    email=excluded.email,
+                    metadata_json=excluded.metadata_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    req.user_id,
+                    req.display_name,
+                    req.email,
+                    json.dumps(req.metadata or {}),
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+    def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
+        if not row:
+            return None
+        return {
+            "user_id": row["user_id"],
+            "display_name": row["display_name"],
+            "email": row["email"],
+            "metadata": json.loads(row["metadata_json"] or "{}"),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
 
     def register_device(self, req: RegisterDeviceRequest):
         with self._lock, self._connect() as conn:
@@ -295,6 +441,104 @@ class SyncStore:
             )
             conn.commit()
 
+    def create_release_artifact(self, req: ReleaseArtifactRequest) -> int:
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO release_artifacts
+                (platform, channel, version, build, download_url, sha256, release_notes_url, minimum_os,
+                 required, metadata_json, active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (
+                    req.platform.lower().strip(),
+                    req.channel.lower().strip(),
+                    req.version,
+                    req.build,
+                    req.download_url,
+                    req.sha256,
+                    req.release_notes_url,
+                    req.minimum_os,
+                    1 if req.required else 0,
+                    json.dumps(req.metadata or {}),
+                    _utc_now(),
+                ),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+
+    def latest_release_artifact(self, platform: str, channel: str) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM release_artifacts
+                WHERE platform=? AND channel=? AND active=1
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (platform.lower().strip(), channel.lower().strip()),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "platform": row["platform"],
+            "channel": row["channel"],
+            "version": row["version"],
+            "build": row["build"],
+            "download_url": row["download_url"],
+            "sha256": row["sha256"],
+            "release_notes_url": row["release_notes_url"],
+            "minimum_os": row["minimum_os"],
+            "required": bool(row["required"]),
+            "metadata": json.loads(row["metadata_json"] or "{}"),
+            "created_at": row["created_at"],
+        }
+
+    def add_feedback(self, req: FeedbackRequest) -> int:
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO feedback
+                (user_id, device_id, category, message, email, app_version, metadata_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    req.user_id,
+                    req.device_id,
+                    req.category,
+                    req.message,
+                    req.email,
+                    req.app_version,
+                    json.dumps(req.metadata or {}),
+                    _utc_now(),
+                ),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+
+    def add_crash_report(self, req: CrashReportRequest) -> int:
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO crash_reports
+                (user_id, device_id, app_version, crash_type, summary, log, metadata_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    req.user_id,
+                    req.device_id,
+                    req.app_version,
+                    req.crash_type,
+                    req.summary[:1000],
+                    req.log[:20000],
+                    json.dumps(req.metadata or {}),
+                    _utc_now(),
+                ),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+
 
 DB_PATH = Path(os.environ.get("CALCIE_SYNC_DB_PATH") or ".calcie/sync_server.db")
 STORE = SyncStore(DB_PATH)
@@ -312,7 +556,27 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "calcie-sync", "ts": _utc_now()}
+    return {"ok": True, "service": "calcie-cloud", "version": "v1", "ts": _utc_now()}
+
+
+def _require_admin_token(x_calcie_admin_token: Optional[str]):
+    expected = (os.environ.get("CALCIE_CLOUD_ADMIN_TOKEN") or "").strip()
+    if expected and x_calcie_admin_token != expected:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+
+
+@app.post("/users")
+def upsert_user(req: UpsertUserRequest):
+    STORE.upsert_user(req)
+    return {"ok": True, "user_id": req.user_id}
+
+
+@app.get("/users/{user_id}")
+def get_user(user_id: str):
+    user = STORE.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"ok": True, "user": user}
 
 
 @app.post("/devices/register")
@@ -366,3 +630,29 @@ def ack_command(command_id: int, req: CommandAckRequest):
     STORE.ack_command(command_id, req.status, req.result)
     return {"ok": True}
 
+
+@app.post("/updates/releases")
+def create_release_artifact(req: ReleaseArtifactRequest, x_calcie_admin_token: Optional[str] = Header(default=None)):
+    _require_admin_token(x_calcie_admin_token)
+    release_id = STORE.create_release_artifact(req)
+    return {"ok": True, "id": release_id}
+
+
+@app.get("/updates/latest")
+def latest_release(platform: str = Query("macos"), channel: str = Query("stable")):
+    release = STORE.latest_release_artifact(platform=platform, channel=channel)
+    if not release:
+        return {"ok": True, "update_available": False, "release": None}
+    return {"ok": True, "update_available": True, "release": release}
+
+
+@app.post("/feedback")
+def add_feedback(req: FeedbackRequest):
+    feedback_id = STORE.add_feedback(req)
+    return {"ok": True, "id": feedback_id}
+
+
+@app.post("/crashes")
+def add_crash_report(req: CrashReportRequest):
+    crash_id = STORE.add_crash_report(req)
+    return {"ok": True, "id": crash_id}

@@ -36,6 +36,7 @@ struct RuntimeStatus: Decodable {
     let runtime_started_at: String?
     let runtime_project_root: String?
     let runtime_api_version: String?
+    let profile_import: ProfileImportStatus?
 }
 
 struct CommandResponse: Decodable {
@@ -59,6 +60,24 @@ struct HealthResponse: Decodable {
 struct EventsEnvelope: Decodable {
     let ok: Bool
     let events: [RuntimeEvent]
+}
+
+struct ProfileImportStatus: Decodable {
+    let ok: Bool?
+    let has_profile: Bool
+    let profile_file: String
+    let has_chatgpt_import: Bool
+    let imported_at: String
+    let imported_chars: Int
+    let import_prompt: String
+}
+
+struct ProfileImportResponse: Decodable {
+    let ok: Bool
+    let response: String
+    let profile_file: String?
+    let imported_at: String?
+    let imported_chars: Int?
 }
 
 struct LocalAPIClient {
@@ -105,6 +124,14 @@ struct LocalAPIClient {
 
     func restartRuntime() async throws -> CommandResponse {
         try await post("runtime/restart", body: [:] as [String: String], as: CommandResponse.self)
+    }
+
+    func profileImportStatus() async throws -> ProfileImportStatus {
+        try await get("profile/import-status", as: ProfileImportStatus.self)
+    }
+
+    func importChatGPTProfile(text: String) async throws -> ProfileImportResponse {
+        try await post("profile/import-chatgpt", body: ["text": text], as: ProfileImportResponse.self)
     }
 
     private func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {

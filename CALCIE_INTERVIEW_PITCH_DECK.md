@@ -5,8 +5,8 @@ Use this as a 10-15 minute interview presentation.
 ---
 
 ## Slide 1 - Title
-**CALCIE: Cross-Device Personal AI Companion Agent**  
-**Presenter:** Surya Teja  
+**CALCIE: Cross-Device Personal AI Companion Agent**
+**Presenter:** Surya Teja
 **Timeline:** 2025 - Present
 
 **Say:**
@@ -142,19 +142,19 @@ Use this as a 10-15 minute interview presentation.
 ---
 
 ## Slide 11 - Key Challenges and How You Solved Them
-**Challenge:** Monolithic prompt caused slow, irrelevant responses  
+**Challenge:** Monolithic prompt caused slow, irrelevant responses
 **Fix:** Prompt split + route-based context trimming
 
-**Challenge:** Skill bypass on typos  
+**Challenge:** Skill bypass on typos
 **Fix:** Fuzzy router + strict intent flags + rewrite
 
-**Challenge:** Web search gave low-quality snippets  
+**Challenge:** Web search gave low-quality snippets
 **Fix:** multi-source scrape + synthesis layer
 
-**Challenge:** TTS auth failures (Google quota/OAuth)  
+**Challenge:** TTS auth failures (Google quota/OAuth)
 **Fix:** ADC token + quota project handling + provider fallback
 
-**Challenge:** Unsafe autonomous actions  
+**Challenge:** Unsafe autonomous actions
 **Fix:** allowlists, bounded plans, confirmation patterns
 
 ---
@@ -195,7 +195,7 @@ Use this as a 10-15 minute interview presentation.
 ---
 
 ## Slide 15 - Close
-**CALCIE in one line:**  
+**CALCIE in one line:**
 "A local-first, cross-device AI execution system with memory, orchestration, and guardrails."
 
 **Ask to interviewer:**
@@ -210,15 +210,14 @@ Use this as a 10-15 minute interview presentation.
 
 ## Likely Interview Questions and Suggested Answers
 
-**Q1: Why not keep everything in one LLM prompt?**  
+**Q1: Why not keep everything in one LLM prompt?**
 A: It increased latency and irrelevant context bleed. Route-specific prompts reduced tokens, response time, and hallucinated carryover.
 
-**Q2: How do you prevent unsafe automation?**  
+**Q2: How do you prevent unsafe automation?**
 A: Tool allowlists, bounded step counts, explicit confirmations for risky flows, and no auto-finalize for purchases.
 
-**Q3: How do you handle provider outages?**  
+**Q3: How do you handle provider outages?**
 A: Multi-provider fallback for both LLM and search; TTS has online and offline fallback chain.
 
-**Q4: What would you productionize next?**  
+**Q4: What would you productionize next?**
 A: Observability, background mobile execution, stronger auth/secrets, and policy-driven permissioning per skill.
-

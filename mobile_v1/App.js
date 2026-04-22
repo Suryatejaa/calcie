@@ -13,7 +13,7 @@ import {
 // V1 config (set in .env as EXPO_PUBLIC_* for deployed backend)
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_CALCIE_API_BASE_URL || "http://YOUR_SERVER_IP:8000";
-const USER_ID = process.env.EXPO_PUBLIC_CALCIE_USER_ID || "surya";
+const USER_ID = process.env.EXPO_PUBLIC_CALCIE_USER_ID || "local-user";
 const DEVICE_ID = process.env.EXPO_PUBLIC_CALCIE_DEVICE_ID || "mobile";
 const DEVICE_TYPE = "mobile";
 const LAPTOP_DEVICE_ID = process.env.EXPO_PUBLIC_CALCIE_LAPTOP_DEVICE_ID || "laptop";
@@ -65,6 +65,13 @@ const APP_ROUTES = [
   {
     regex: /\binstagram\b|\big\b/,
     name: "Instagram",
+    packageName: "com.instagram.android",
+    appUrls: ["instagram://app"],
+    fallbackUrl: "https://www.instagram.com",
+  },
+  {
+    regex: /\binsta\b|\big\b/,
+    name: "Insta",
     packageName: "com.instagram.android",
     appUrls: ["instagram://app"],
     fallbackUrl: "https://www.instagram.com",
@@ -308,7 +315,7 @@ export default function App() {
         user_id: USER_ID,
         device_id: DEVICE_ID,
         device_type: DEVICE_TYPE,
-        label: "Surya Mobile",
+        label: process.env.EXPO_PUBLIC_CALCIE_DEVICE_LABEL || "CALCIE Mobile",
         metadata: { app: "calcie-mobile-v1" },
       }),
     });

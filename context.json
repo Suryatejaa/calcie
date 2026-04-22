@@ -3,7 +3,7 @@
     "name": "Calcie",
     "description": "Personal AI assistant with voice input/output, local LLM (Ollama), and memory system",
     "original_name": "Jarvis",
-    "owner": "Surya"
+    "owner": "local-user"
   },
   "sessions": [
     {

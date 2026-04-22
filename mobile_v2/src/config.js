@@ -1,6 +1,6 @@
 export const DEFAULT_SETTINGS = {
   apiBaseUrl: process.env.EXPO_PUBLIC_CALCIE_API_BASE_URL || "https://calcie.onrender.com",
-  userId: process.env.EXPO_PUBLIC_CALCIE_USER_ID || "surya",
+  userId: process.env.EXPO_PUBLIC_CALCIE_USER_ID || "local-user",
   deviceId: process.env.EXPO_PUBLIC_CALCIE_DEVICE_ID || "mobile-v2",
   deviceType: process.env.EXPO_PUBLIC_CALCIE_DEVICE_TYPE || "mobile",
   laptopDeviceId: process.env.EXPO_PUBLIC_CALCIE_LAPTOP_DEVICE_ID || "laptop",

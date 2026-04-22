@@ -58,7 +58,7 @@ class CommandArbiter:
         "app": {
             "open", "launch", "start", "play", "resume", "continue",
             "chrome", "safari", "spotify", "youtube", "yt", "ytmusic",
-            "whatsapp", "instagram", "discord", "slack",
+            "whatsapp", "instagram","insta" "discord", "slack",
         },
         "computer": {
             "control", "computer", "click", "double", "right", "scroll",

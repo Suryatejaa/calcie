@@ -29,7 +29,17 @@ It runs on laptop (main runtime), supports cross-device sync with Android client
   - browser UI becomes the workspace instead of dumping job results into CLI
 - Added **sports-specific routing**:
   - ESPN MCP path for supported leagues like NBA/NFL/UFC/F1
-  - cricket/IPL stays on fallback search path
+  - cricket/IPL live score uses the CREX series page parser before falling back
+- Added **deployment planning**:
+  - backend + DB shape
+  - DMG/signing/notarization pipeline
+  - website/docs launch flow
+  - update notification manifest
+  - first-run ChatGPT memory import onboarding
+- Added **first-run profile import plumbing**:
+  - Advanced Options can copy the ChatGPT memory export prompt
+  - pasted fenced response imports into local-only `calcie_profile.local.json`
+  - raw import backup is stored under `.calcie/profile_imports/`
 - Added **weather-specific handling**:
   - direct WeatherAPI path when `WEATHER_API_KEY` is valid
   - grounded Gemini fallback when the dedicated weather provider is unavailable
@@ -50,7 +60,10 @@ It runs on laptop (main runtime), supports cross-device sync with Android client
     - one app-owned `MediaSessionManager`
     - one reusable player window reference
     - one reusable `WKWebView` surface
-    - bootstrap hardcoded YouTube player URL to prove owned playback surface before resolver work
+    - resolved YouTube / YouTube Music watch-page loading inside the owned player
+    - desktop media controls for `play`, `pause`, `resume`, `next`, `previous`, and `play again`
+    - in-player controls for mute, volume, speed, and seek
+    - lightweight history plus persisted last-session restore across app restarts
 - Local API access logs are disabled by default to keep CALCIE output clean.
 - Added a stable-signing workflow helper for packaged macOS installs:
   - `./scripts/check_calcie_codesign.sh`
@@ -155,6 +168,7 @@ Implemented skills:
 - `ComputerControlSkill`
 - `AgenticComputerUseSkill`
 - `ScreenVisionSkill`
+- `ScreenMemoryPipeline` behind `ScreenVisionSkill`
 
 ### 4) Request Processing Pipeline
 
@@ -173,6 +187,39 @@ Implemented skills:
 7. Stream LLM output.
 8. Speak output via TTS chain.
 9. Persist response locally and optionally to sync backend.
+
+### Screen Memory
+
+CALCIE has an optional screen-memory pipeline:
+
+```text
+Screenshot -> Apple Vision OCR -> LLM JSON extraction -> dedup -> ChromaDB or JSONL
+```
+
+It is privacy-off by default. Enable it only when you want CALCIE to remember useful screen context:
+
+```env
+CALCIE_SCREEN_MEMORY_ENABLED=1
+CALCIE_SCREEN_MEMORY_INTERVAL_S=45
+CALCIE_SCREEN_MEMORY_DEDUP_THRESHOLD=0.15
+CALCIE_SCREEN_MEMORY_STORE=auto
+CALCIE_SCREEN_MEMORY_SKIP_IDLE_S=300
+CALCIE_SCREEN_MEMORY_BACKGROUND_ENABLED=1
+CALCIE_SCREEN_MEMORY_KEEP_CAPTURES=0
+```
+
+Storage:
+- OCR snapshots: `.calcie/screen_memory/ocr/`
+- JSONL fallback memories: `.calcie/screen_memory/memories.jsonl`
+- Activity timeline: `.calcie/screen_memory/activity.jsonl`
+- ChromaDB store, when `chromadb` is installed: `.calcie/screen_memory/chroma/`
+
+Notes:
+- macOS Apple Vision OCR is handled by `scripts/apple_vision_ocr.swift`.
+- ChromaDB is optional; without it CALCIE uses conservative JSONL fuzzy dedup.
+- The extractor filters obvious secrets/tokens/passwords and skips locked/idle screens where detectable.
+- When `CALCIE_SCREEN_MEMORY_ENABLED=1`, CALCIE starts a background memory loop even if no vision monitor goal is running.
+- `vision stop` stops alert monitoring only; it does not stop the memory loop while screen memory remains enabled.
 
 ### 5) TTS Design
 
@@ -568,8 +615,18 @@ Current behavior:
 - compact menu with advanced settings split into a floating panel
 - **hold Right Option** for talk-to-CALCIE
 - launch-at-login toggle for `CALCIE.app`
-- app-owned CALCIE Player bootstrap surface with one reusable window and one reusable web view
-- desktop `play` / `pause` / `resume` commands now prefer CALCIE Player when the shell is active
+- app-owned CALCIE Player surface with one reusable window and one reusable web view
+- desktop media commands now prefer CALCIE Player when the shell is active:
+  - `play`
+  - `pause`
+  - `resume`
+  - `next`
+  - `previous`
+  - `play again`
+  - `mute` / `unmute`
+  - `volume up` / `volume down` / `set volume to 40`
+  - `faster` / `slower` / `speed 1.5x`
+  - `forward 10 seconds` / `rewind 15 seconds`
 
 Build/install:
 
@@ -599,12 +656,37 @@ The first player milestone is intentionally simple and architecture-first:
 - one CALCIE-owned player window
 - one reusable `WKWebView`
 - no normal browser tabs for desktop playback experiments
+- query-aware resolver that prefers stronger watch-page matches over blind first-result loading
+- lightweight session metadata:
+  - current platform
+  - last resolved query
+  - last playable title/url
+  - recent remembered history
+- persisted player session under `~/.calcie/runtime/media_session_state.json`
 
 Current status:
 - you can open the player from the mini menu or Advanced Options
-- it loads a hardcoded YouTube bootstrap URL
-- desktop media commands can now reuse this same surface for `play`, `pause`, and `resume`
-- future media resolver work should keep reusing this same surface instead of opening new tabs
+- it uses watch-page loading for YouTube / YouTube Music inside the CALCIE-owned surface
+- desktop media commands can reuse this same surface for:
+  - `play <song>`
+  - `play video song <name>`
+  - `pause`
+  - `resume`
+  - `next`
+  - `previous`
+  - `play again`
+  - `mute`
+  - `unmute`
+  - `volume up`
+  - `volume down`
+  - `set volume to 40`
+  - `faster`
+  - `slower`
+  - `speed 1.5x`
+  - `forward 10 seconds`
+  - `rewind 15 seconds`
+- after restart, `resume` / `play music` can restore the last known playable session instead of starting empty
+- future queue work should keep extending this same surface instead of opening new tabs
 
 ---
 
@@ -678,6 +760,62 @@ Enable/debug router:
 - Never commit real keys in `.env`.
 - Rotate leaked keys immediately.
 - Keep personal profile/facts files private if they contain sensitive data.
+- Run release hygiene before packaging:
+
+```bash
+./scripts/check_release_hygiene.py
+```
+
+This fails if a release may include `.env`, `.calcie`, screen captures, OCR dumps, local profile imports, local DBs, or obvious secret tokens.
+
+Dev/prod release flow:
+
+```bash
+./scripts/configure_release_remotes.sh
+./scripts/promote_calcie_prod.sh
+```
+
+See `CALCIE_RELEASE_FLOW.md` for the full dev -> QA -> prod process, Render backend production notes, and Vercel website deployment flow.
+
+Build a local macOS DMG:
+
+```bash
+CALCIE_CODESIGN_IDENTITY="Apple Development: your@example.com (TEAMID)" \
+CALCIE_RELEASE_CHANNEL=alpha \
+./scripts/build_calcie_dmg.sh release
+```
+
+The DMG is written to `dist/` and release metadata is written to `dist/calcie_release_manifest.json`.
+Set `CALCIE_RELEASE_PUBLIC_BASE_URL` and `CALCIE_RELEASE_NOTES_URL` before final release so the metadata can be published to the update manifest endpoint.
+
+Publish release metadata after uploading the DMG:
+
+```bash
+export CALCIE_CLOUD_BASE_URL="https://your-calcie-backend.example.com"
+export CALCIE_CLOUD_ADMIN_TOKEN="<your-admin-token>"
+./scripts/publish_calcie_release.py \
+  --download-url https://your-download-host/CALCIE-0.1.0-1-alpha.dmg \
+  --release-notes-url https://your-site/releases/0.1.0
+```
+
+Preview without publishing:
+
+```bash
+./scripts/publish_calcie_release.py --dry-run --allow-empty-url
+```
+
+Website/docs skeleton:
+
+```text
+index.html
+docs/setup.html
+docs/privacy.html
+releases/0.1.0.html
+styles.css
+main.js
+```
+
+Use this static site for the first public launch page, setup guide, privacy page, and release notes. Replace the placeholder download button after uploading the DMG.
 
 ---
 

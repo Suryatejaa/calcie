@@ -100,12 +100,12 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         super.init()
 
         let rootView = MenuBarContentView(viewModel: viewModel, mediaSessionManager: mediaSessionManager)
-            .frame(width: 360)
+            .frame(width: 520)
 
         popover.behavior = .transient
         popover.animates = false
         popover.delegate = self
-        popover.contentSize = NSSize(width: 388, height: 330)
+        popover.contentSize = NSSize(width: 540, height: 680)
         popover.contentViewController = NSHostingController(rootView: rootView)
 
         if let button = statusItem.button {
@@ -205,18 +205,29 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
 struct MenuBarContentView: View {
     @ObservedObject var viewModel: ShellViewModel
     @ObservedObject var mediaSessionManager: MediaSessionManager
+    @State private var showTools = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
+        VStack(alignment: .leading, spacing: 10) {
+            chatHeader
             Divider()
-            quickActions
+            chatTranscript
+            chatComposer
+            if !viewModel.commandError.isEmpty {
+                Text(viewModel.commandError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(3)
+            }
             Divider()
-            typedCommand
-            Divider()
-            playerControls
-            Divider()
-            visionControls
+            DisclosureGroup(isExpanded: $showTools) {
+                compactTools
+                    .padding(.top, 8)
+            } label: {
+                Text("Tools & Status")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
             footer
         }
         .padding(14)
@@ -227,6 +238,122 @@ struct MenuBarContentView: View {
         )
         .onDisappear {
             viewModel.clearPanelFrame()
+        }
+    }
+
+    private var chatHeader: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Ask CALCIE")
+                    .font(.headline)
+                Text(viewModel.runtimeOnline ? "Follow up, review responses, or hold Right Option to talk." : "Runtime needs attention before chat can respond.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(viewModel.runtimeState.replacingOccurrences(of: "_", with: " "))
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.thinMaterial, in: Capsule())
+                Button("Clear") {
+                    viewModel.clearChat()
+                }
+                .font(.caption)
+            }
+        }
+    }
+
+    private var chatTranscript: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(viewModel.chatMessages) { message in
+                        ChatBubble(message: message)
+                            .id(message.id)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+            }
+            .frame(minHeight: 380, maxHeight: 430)
+            .onChange(of: viewModel.chatMessages.count) { _ in
+                guard let last = viewModel.chatMessages.last else { return }
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+        }
+    }
+
+    private var chatComposer: some View {
+        HStack(spacing: 8) {
+            Button {
+                viewModel.toggleVoice()
+            } label: {
+                Image(systemName: viewModel.voiceSessionActive ? "mic.fill" : "mic")
+            }
+            .help(viewModel.voiceSessionActive ? "Stop talking" : "Talk to CALCIE")
+
+            TextField("Ask follow up...", text: $viewModel.chatInput)
+                .onSubmit {
+                    viewModel.submitChatMessage()
+                }
+                .textFieldStyle(.roundedBorder)
+                .disabled(viewModel.isSubmittingCommand)
+
+            Button {
+                viewModel.submitChatMessage()
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.caption.weight(.bold))
+            }
+            .disabled(viewModel.isSubmittingCommand || viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .keyboardShortcut(.return, modifiers: [])
+        }
+    }
+
+    private var compactTools: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Button(viewModel.voiceSessionActive ? "Stop Talking" : "Talk") {
+                    viewModel.toggleVoice()
+                }
+                Button("Advanced") {
+                    viewModel.openAdvancedOptions()
+                }
+                Button("Player") {
+                    mediaSessionManager.showPlayer()
+                }
+                Button("Refresh") {
+                    Task { await viewModel.refreshAll() }
+                }
+            }
+            HStack {
+                Button("Start Vision") {
+                    viewModel.startVision()
+                }
+                Button("Stop Vision") {
+                    viewModel.stopVision()
+                }
+                Button("Quit") {
+                    NSApplication.shared.terminate(nil)
+                }
+            }
+            Text("LLM: \(viewModel.activeLLM) · TTS: \(viewModel.ttsProvider) · Route: \(viewModel.lastRoute)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            if !viewModel.runtimeDetail.isEmpty {
+                Text(viewModel.runtimeDetail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
         }
     }
 
@@ -356,7 +483,7 @@ struct MenuBarContentView: View {
         }
     }
 
-    private var footer: some View { 
+    private var footer: some View {
         HStack {
             Text(viewModel.runtimeOnline ? "Runtime connected" : "Runtime offline")
                 .font(.caption2)
@@ -365,6 +492,34 @@ struct MenuBarContentView: View {
             Text("Hold Right Option")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct ChatBubble: View {
+    let message: ChatMessage
+
+    var body: some View {
+        HStack(alignment: .top) {
+            if message.isUser {
+                Spacer(minLength: 42)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(message.isUser ? "you" : "CALCIE says")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(message.text)
+                    .font(message.isUser ? .body.weight(.medium) : .body)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(message.isUser ? Color.secondary.opacity(0.20) : Color.secondary.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            if !message.isUser {
+                Spacer(minLength: 42)
+            }
         }
     }
 }
@@ -379,6 +534,10 @@ struct AdvancedOptionsView: View {
                 runtimeSection
                 Divider()
                 assistantSection
+                Divider()
+                profileImportSection
+                Divider()
+                updatesSection
                 Divider()
                 playerSection
                 Divider()
@@ -451,6 +610,99 @@ struct AdvancedOptionsView: View {
         }
     }
 
+    private var profileImportSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("First-Run Memory Import")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(viewModel.hasChatGPTProfileImport ? "Imported" : "Optional")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(viewModel.hasChatGPTProfileImport ? .green : .secondary)
+            }
+            Text("For a fresh install, ask ChatGPT for a memory export, then paste the fenced response here. CALCIE stores it locally and does not upload it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(viewModel.profileImportPrompt)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .padding(8)
+                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            HStack {
+                Button("Copy Prompt") {
+                    viewModel.copyProfileImportPrompt()
+                }
+                Button("Refresh Status") {
+                    Task { await viewModel.refreshProfileImportStatus() }
+                }
+            }
+            TextEditor(text: $viewModel.profileImportText)
+                .font(.caption)
+                .frame(minHeight: 92)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.25))
+                )
+            HStack {
+                Button(viewModel.profileImportInFlight ? "Importing..." : "Import ChatGPT Memory") {
+                    viewModel.importChatGPTProfile()
+                }
+                .disabled(viewModel.profileImportInFlight || viewModel.profileImportText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if viewModel.profileImportInFlight {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            Text(viewModel.profileImportMessage)
+                .font(.caption2)
+                .foregroundStyle(viewModel.hasChatGPTProfileImport ? .green : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Updates")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(viewModel.updateAvailable ? "Available" : "Checked")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(viewModel.updateAvailable ? .orange : .secondary)
+            }
+            Text(viewModel.updateStatusMessage)
+                .font(.caption)
+                .foregroundStyle(viewModel.updateAvailable ? .orange : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if viewModel.updateAvailable {
+                Text("Version \(viewModel.updateVersion) · build \(viewModel.updateBuild)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if viewModel.updateRequired {
+                    Text("This update is marked required.")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.red)
+                }
+            }
+            HStack {
+                Button(viewModel.updateCheckInFlight ? "Checking..." : "Check Now") {
+                    Task { await viewModel.refreshUpdateStatus() }
+                }
+                .disabled(viewModel.updateCheckInFlight)
+                Button("Download") {
+                    viewModel.openUpdateDownload()
+                }
+                .disabled(!viewModel.updateAvailable || viewModel.updateDownloadURL.isEmpty)
+                Button("Release Notes") {
+                    viewModel.openUpdateReleaseNotes()
+                }
+                .disabled(viewModel.updateReleaseNotesURL.isEmpty)
+            }
+        }
+    }
+
     private var playerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("CALCIE Player")
@@ -463,6 +715,17 @@ struct AdvancedOptionsView: View {
             Text(mediaSessionManager.currentSubtitle)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Google session: \(mediaSessionManager.googleSessionState)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(mediaSessionManager.googleSessionDetail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(mediaSessionManager.googleSessionFallbackHint)
+                .font(.caption2)
+                .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
             if !mediaSessionManager.currentURLString.isEmpty {
                 Text(mediaSessionManager.currentURLString)
@@ -479,6 +742,27 @@ struct AdvancedOptionsView: View {
                 }
                 Button("Bootstrap Video") {
                     mediaSessionManager.loadBootstrapMedia()
+                }
+            }
+            HStack {
+                Button("Premium Login") {
+                    mediaSessionManager.openEmbeddedGoogleSignIn(
+                        for: mediaSessionManager.currentPlatform == "ytmusic" ? "ytmusic" : "youtube"
+                    )
+                }
+                Button("YouTube Login") {
+                    mediaSessionManager.openGoogleSignIn(for: "youtube")
+                }
+                Button("Music Login") {
+                    mediaSessionManager.openGoogleSignIn(for: "ytmusic")
+                }
+            }
+            HStack {
+                Button("Sign Out") {
+                    mediaSessionManager.signOutGoogleSession()
+                }
+                Button("Open Google Login") {
+                    mediaSessionManager.openGoogleSignInInBrowser(for: "youtube")
                 }
             }
         }

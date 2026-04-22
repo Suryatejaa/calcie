@@ -73,6 +73,7 @@ from calcie_core.skills import (
     AppAccessSkill,
     CodingSkill,
     ComputerControlSkill,
+    ScreenMemoryPipeline,
     ScreenVisionSkill,
     SearchingSkill,
 )
@@ -154,6 +155,14 @@ except ImportError:
 
 
 class Calcie:
+    CHATGPT_MEMORY_IMPORT_PROMPT = (
+        "Return everything you know about me inside one fenced code block. "
+        "Include long-term memory, bio details, and any model-set context you have with dates when available. "
+        "I want a thorough memory export of what you've learned about me. "
+        "Skip tool details and include only information that is actually about me. "
+        "Be exhaustive and careful."
+    )
+
     """Personal AI assistant powered by Ollama."""
     SYSTEM_PROMPT = GENERAL_CHAT_PROMPT
     WAKE_WORDS = [
@@ -347,11 +356,16 @@ class Calcie:
         self.computer_skill = ComputerControlSkill(
             project_root=self.project_root,
         )
+        self.screen_memory_pipeline = ScreenMemoryPipeline(
+            project_root=self.project_root,
+            llm_collect_text=self._collect_llm_text,
+        )
         self.screen_vision_skill = ScreenVisionSkill(
             project_root=self.project_root,
             analyze_image=self._analyze_screen_snapshot,
             notify_user=self._notify_screen_vision_alert,
             execute_action=self._execute_screen_vision_action,
+            memory_pipeline=self.screen_memory_pipeline,
         )
         self.searching_skill = SearchingSkill(
             llm_collect_text=self._collect_llm_text,
@@ -359,6 +373,7 @@ class Calcie:
             max_results=5,
             max_source_chars=5000,
             app_skill=self.app_skill,
+            vision_skill=self.screen_vision_skill,
             project_root=self.project_root,
         )
         self.agentic_computer_use_skill = AgenticComputerUseSkill(
@@ -444,14 +459,26 @@ class Calcie:
                 except Exception:
                     pass
 
-        self.profile_file = "calcie_profile.json"
+        self.profile_file = os.getenv("CALCIE_PROFILE_FILE", "calcie_profile.local.json")
         self.profile_data = {}
-        if os.path.exists(self.profile_file):
+        profile_candidates = [self.profile_file]
+        if self.profile_file != "calcie_profile.json":
+            profile_candidates.append("calcie_profile.json")
+        for profile_file in profile_candidates:
+            if not os.path.exists(profile_file):
+                continue
             try:
-                with open(self.profile_file, "r") as f:
+                with open(profile_file, "r") as f:
                     loaded = json.load(f)
                     if isinstance(loaded, dict):
-                        self.profile_data = loaded
+                        non_empty_profile = {
+                            k: v
+                            for k, v in loaded.items()
+                            if not str(k).startswith("_") and v not in ("", [], {}, None)
+                        }
+                        self.profile_data = loaded if non_empty_profile else {}
+                        self.profile_file = profile_file
+                        break
             except Exception:
                 self.profile_data = {}
 
@@ -763,6 +790,80 @@ class Calcie:
         if not points:
             return ""
         return "Here is what I know about you right now:\n- " + "\n- ".join(points[:7])
+
+    def _profile_import_path(self) -> Path:
+        return self.project_root / ".calcie" / "profile_imports" / "chatgpt_memory_export.md"
+
+    def get_profile_import_status(self) -> dict:
+        import_info = {}
+        if isinstance(self.profile_data, dict):
+            raw_info = self.profile_data.get("memory_import")
+            if isinstance(raw_info, dict):
+                import_info = raw_info
+        import_path = self._profile_import_path()
+        return {
+            "has_profile": bool(self.profile_data),
+            "profile_file": str((self.project_root / self.profile_file).resolve()),
+            "has_chatgpt_import": bool(import_info.get("source") == "chatgpt_manual_export" or import_path.exists()),
+            "imported_at": str(import_info.get("imported_at") or ""),
+            "imported_chars": int(import_info.get("chars") or 0),
+            "import_prompt": self.CHATGPT_MEMORY_IMPORT_PROMPT,
+        }
+
+    def import_chatgpt_memory_export(self, submitted_text: str) -> dict:
+        raw = (submitted_text or "").strip()
+        if not raw:
+            return {"ok": False, "response": "Paste the ChatGPT memory export first."}
+
+        memory_text = self._extract_first_fenced_block(raw) or raw
+        memory_text = memory_text.strip()
+        if len(memory_text) < 40:
+            return {
+                "ok": False,
+                "response": "That import looks too short. Paste the fenced code block ChatGPT returns.",
+            }
+
+        imported_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        profile_path = self.project_root / self.profile_file
+        if profile_path.name == "calcie_profile.json":
+            profile_path = self.project_root / "calcie_profile.local.json"
+            self.profile_file = "calcie_profile.local.json"
+
+        profile = self.profile_data if isinstance(self.profile_data, dict) else {}
+        profile = dict(profile)
+        profile["memory_import"] = {
+            "source": "chatgpt_manual_export",
+            "imported_at": imported_at,
+            "chars": len(memory_text),
+            "text": memory_text,
+        }
+
+        profile_path.write_text(json.dumps(profile, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        import_path = self._profile_import_path()
+        import_path.parent.mkdir(parents=True, exist_ok=True)
+        import_path.write_text(memory_text + "\n", encoding="utf-8")
+
+        self.profile_data = profile
+        self._record_runtime_event(
+            "profile",
+            f"Imported ChatGPT memory export ({len(memory_text)} chars)",
+            severity="low",
+            route="profile",
+            state=self._get_runtime_state(),
+        )
+        return {
+            "ok": True,
+            "response": f"Imported ChatGPT memory export into {profile_path.name}.",
+            "profile_file": str(profile_path.resolve()),
+            "imported_at": imported_at,
+            "imported_chars": len(memory_text),
+        }
+
+    def _extract_first_fenced_block(self, text: str) -> str:
+        match = re.search(r"```(?:[a-zA-Z0-9_-]+)?\s*(.*?)\s*```", text or "", flags=re.DOTALL)
+        if not match:
+            return ""
+        return match.group(1).strip()
 
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
@@ -1141,7 +1242,7 @@ class Calcie:
             raise Exception("Claude not configured")
 
         client = Anthropic(api_key=self.anthropic_key)
-        system_msg = "You are CALCIE, Surya's personal AI companion."
+        system_msg = "You are CALCIE, the user's local AI companion."
         for m in messages:
             if m["role"] == "system":
                 system_msg = m["content"]
@@ -1165,7 +1266,7 @@ class Calcie:
 
         genai.configure(api_key=self.gemini_key)
 
-        system_msg = "You are CALCIE, Surya's personal AI companion."
+        system_msg = "You are CALCIE, the user's local AI companion."
         chat_contents = []
         for m in messages:
             role = m.get("role")
@@ -1993,6 +2094,7 @@ class Calcie:
         spoken = re.sub(r"\s*\n+\s*", " ", spoken)  # avoid long newline pauses
         spoken = re.sub(r"(?<!\d)[\.;:](?!\d)", " ", spoken)  # reduce hard stops
         spoken = re.sub(r"\s*,\s*", " ", spoken)
+        spoken = re.sub(r"\bCALCIE\b", "Calcie", spoken)
         spoken = re.sub(r"\s{2,}", " ", spoken)
         spoken = re.sub(r"[^\x00-\x7F]+", "", spoken).strip(" ,")
         return spoken
@@ -2395,7 +2497,10 @@ class Calcie:
         return core_limit_words(text, max_words)
 
     def _short_greeting_reply(self, _user_input: str) -> str:
-        return "Hey Surya. I am online. Tell me one task and we will execute it now."
+        profile = self.profile_data if isinstance(self.profile_data, dict) else {}
+        name = str(profile.get("name") or "").strip()
+        greeting = f"Hey {name}." if name else "Hey."
+        return f"{greeting} I am online. Tell me one task and we will execute it now."
 
     def _format_news_results(self, results: list) -> str:
         return core_format_news_results(

@@ -44,11 +44,13 @@ class SearchingSkill:
         max_results: int = 5,
         max_source_chars: int = 5000,
         app_skill=None,
+        vision_skill=None,
         project_root: Optional[pathlib.Path] = None,
     ):
         self.llm_collect_text = llm_collect_text
         self.fallback_search = fallback_search
         self.app_skill = app_skill
+        self.vision_skill = vision_skill
         self.project_root = pathlib.Path(project_root or pathlib.Path.cwd()).resolve()
         self.max_results = max(3, min(8, int(max_results)))
         self.max_source_chars = max(1500, int(max_source_chars))
@@ -56,6 +58,7 @@ class SearchingSkill:
         self.exa_api_key = (os.environ.get("EXA_API_KEY") or "").strip()
         self.weather_api_key = (os.environ.get("WEATHER_API_KEY") or "").strip()
         self.weather_llm_provider = (os.environ.get("CALCIE_WEATHER_LLM_PROVIDER") or "gemini").strip().lower()
+        self.cricket_llm_provider = (os.environ.get("CALCIE_CRICKET_LLM_PROVIDER") or "gemini").strip().lower()
         self.rapidapi_key = (os.environ.get("RAPIDAPI_KEY") or "").strip()
         self.apify_api_key = (os.environ.get("APIFY_API") or "").strip()
         self.apify_actor_id = (os.environ.get("APIFY_ID") or "").strip()
@@ -82,6 +85,25 @@ class SearchingSkill:
         self.sports_mcp_timeout_s = max(5, min(20, int(os.environ.get("CALCIE_SPORTS_MCP_TIMEOUT_S", "10"))))
         self.weather_api_url = (os.environ.get("CALCIE_WEATHER_API_URL") or "https://api.weatherapi.com/v1/current.json").strip()
         self.weather_default_query = (os.environ.get("CALCIE_WEATHER_DEFAULT_QUERY") or "auto:ip").strip() or "auto:ip"
+        self.cricket_live_scores_url = (
+            os.environ.get("CALCIE_CRICKET_LIVE_SCORES_URL") or "https://crex.com/cricket-live-score"
+        ).strip()
+        self.cricket_crex_series_url = (
+            os.environ.get("CALCIE_CRICKET_CREX_SERIES_URL")
+            or "https://crex.com/series/indian-premier-league-2026-1PW"
+        ).strip()
+        self.cricket_results_url = (
+            os.environ.get("CALCIE_CRICKET_RESULTS_URL") or "https://www.iplt20.com/matches/results"
+        ).strip()
+        self.cricket_browser = (os.environ.get("CALCIE_CRICKET_BROWSER") or "chrome").strip() or "chrome"
+        self.cricket_page_wait_s = max(
+            1.0,
+            min(8.0, float((os.environ.get("CALCIE_CRICKET_PAGE_WAIT_S") or "3.0").strip() or "3.0")),
+        )
+        self.cricket_vision_attempts = max(
+            1,
+            min(4, int((os.environ.get("CALCIE_CRICKET_VISION_ATTEMPTS") or "3").strip() or "3")),
+        )
         self.show_sources = (os.environ.get("CALCIE_SEARCH_SHOW_SOURCES", "1").strip().lower() in {"1", "true", "yes", "on"})
         self.debug_output = (os.environ.get("CALCIE_SEARCH_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"})
         self._tavily_client = TavilyClient(api_key=self.tavily_api_key) if TavilyClient and self.tavily_api_key else None
@@ -100,6 +122,8 @@ class SearchingSkill:
         if normalized in {"news", "latest news", "today news", "headlines"}:
             return True
         if self._is_weather_query(normalized):
+            return True
+        if self._is_cricket_query(normalized):
             return True
         if normalized.startswith("check ") and re.search(r"\b(ipl|score|match|won|news|price|weather|result|points|table)\b", normalized):
             return True
@@ -134,6 +158,10 @@ class SearchingSkill:
         normalized_query = self._normalize(query)
         if self._is_weather_query(normalized_query):
             response, spoken = self._handle_weather_query(query)
+            if response:
+                return response, spoken
+        if self._is_cricket_query(normalized_query):
+            response, spoken = self._handle_cricket_query(query)
             if response:
                 return response, spoken
         if self._is_sports_query(normalized_query) and not self._is_unsupported_espn_sport(normalized_query):
@@ -189,6 +217,413 @@ class SearchingSkill:
         if self.debug_output:
             response += f"\n\n[debug] provider=espn_mcp | tool={tool_name} | reason={reason}"
         return response, "I checked the sports data."
+
+    def _handle_cricket_query(self, query: str) -> Tuple[Optional[str], Optional[str]]:
+        normalized = self._normalize(query)
+        explicit_page_query = self._is_explicit_cricket_page_query(normalized)
+        wants_live = self._is_cricket_live_query(normalized)
+
+        if wants_live:
+            crex_live = self._handle_crex_ipl_live_score(query)
+            if crex_live[0]:
+                return crex_live
+
+        grounded = self._handle_cricket_query_llm(query)
+        if grounded[0]:
+            return grounded
+
+        if self.app_skill is None or self.vision_skill is None:
+            if self._is_cricket_live_query(normalized):
+                return (
+                    "I could not check the live cricket score right now.",
+                    "I could not check the live cricket score right now.",
+                )
+            return (
+                "I could not check the cricket result right now.",
+                "I could not check the cricket result right now.",
+            )
+
+        target_url = self.cricket_live_scores_url if wants_live else self.cricket_results_url
+        open_result = self.app_skill.open_target_in_app(
+            target=target_url,
+            app_name=self.cricket_browser,
+            allow_default_browser_fallback=True,
+        )
+        time.sleep(self.cricket_page_wait_s)
+
+        analysis, vision_result = self._run_cricket_vision_summary(query=query, wants_live=wants_live)
+
+        if explicit_page_query:
+            response = f"{open_result}\n\n{analysis}"
+        else:
+            response = analysis
+        if self.debug_output:
+            screenshot_path = str(vision_result.get("screenshot_path") or "").strip()
+            if screenshot_path:
+                response += f"\n\n[debug] screenshot={screenshot_path}"
+        return response, "I opened the cricket page and checked the visible score."
+
+    def _handle_crex_ipl_live_score(self, query: str) -> Tuple[Optional[str], Optional[str]]:
+        html_text, source = self._fetch_crex_series_html()
+        if not html_text:
+            return None, None
+
+        cards = self._extract_crex_match_cards(html_text)
+        if not cards:
+            return None, None
+
+        selected = self._select_crex_live_match_card(cards)
+        if not selected:
+            return None, None
+
+        response = self._summarize_crex_match_card(query=query, selected=selected, cards=cards)
+        if not response:
+            response = self._format_crex_match_card_deterministically(selected)
+        if not response:
+            return None, None
+
+        response = response.strip()
+        if self.show_sources:
+            response += f"\n\nSource: {source}"
+        if self.debug_output:
+            response += (
+                f"\n\n[debug] provider=crex_series_html"
+                f" | selected_match={selected.get('match_number') or '-'}"
+                f" | cards={len(cards)}"
+            )
+        spoken = response.split("\n", 1)[0].strip()
+        return response, spoken
+
+    def _fetch_crex_series_html(self) -> Tuple[str, str]:
+        source_url = self.cricket_crex_series_url
+        html_text, err = self._fetch_url_raw_text(source_url, max_bytes=700_000, timeout=max(self.page_fetch_timeout_s, 8))
+        if html_text:
+            return html_text, source_url
+
+        # Local fixture fallback keeps the parser usable during development/offline testing.
+        local_fixture = self.project_root / "indian-premier-league-2026-1PW.html"
+        if local_fixture.exists():
+            try:
+                return local_fixture.read_text(encoding="utf-8", errors="replace"), str(local_fixture)
+            except OSError:
+                return "", source_url
+        if self.debug_output and err:
+            return "", f"{source_url} ({err})"
+        return "", source_url
+
+    def _fetch_url_raw_text(self, url: str, max_bytes: int = 500_000, timeout: int = 8) -> Tuple[str, Optional[str]]:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36"
+                )
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as res:
+                raw = res.read(max_bytes)
+        except Exception as exc:
+            return "", self._safe_error(exc)
+        return raw.decode("utf-8", errors="replace"), None
+
+    def _extract_crex_match_cards(self, html_text: str) -> List[Dict[str, str]]:
+        if not html_text:
+            return []
+        cards: List[Dict[str, str]] = []
+        seen = set()
+
+        # Primary path: parse complete match-card anchors anywhere in the document.
+        # This intentionally scans the whole HTML. It must not rely on a fixed line
+        # number because CREX often ships most Angular-rendered content on one line.
+        anchor_pattern = re.compile(
+            r"""<a\b[^>]*href\s*=\s*(['"])(?P<href>[^'"]*/cricket-live-score/[^'"]+)\1[^>]*>(?P<body>.*?)</a>""",
+            flags=re.IGNORECASE | re.DOTALL | re.VERBOSE,
+        )
+        for match in anchor_pattern.finditer(html_text):
+            href = match.group("href")
+            body = match.group("body")
+            self._append_crex_card(cards, seen, href, self._html_to_text(body), extractor="anchor")
+
+        # Fallback path: if card markup changes and the full closing </a> is no
+        # longer easy to pair, use the local context around each live-score URL.
+        # This keeps us anchored to semantic URL patterns rather than fragile lines.
+        href_pattern = re.compile(
+            r"""href\s*=\s*(['"])(?P<href>[^'"]*/cricket-live-score/[^'"]+)\1""",
+            flags=re.IGNORECASE | re.VERBOSE,
+        )
+        for match in href_pattern.finditer(html_text):
+            href = match.group("href")
+            anchor_start = html_text.rfind("<a", 0, match.start())
+            start = anchor_start if anchor_start >= max(0, match.start() - 300) else match.start()
+            end = min(len(html_text), match.end() + 2200)
+            context = html_text[start:end]
+            self._append_crex_card(cards, seen, href, self._html_to_text(context), extractor="context")
+        return cards
+
+    def _append_crex_card(
+        self,
+        cards: List[Dict[str, str]],
+        seen: set,
+        href: str,
+        text: str,
+        extractor: str,
+    ) -> None:
+        if not href:
+            return
+        full_url = urllib.parse.urljoin("https://crex.com/", href)
+        key = full_url.lower()
+        if key in seen:
+            return
+        text = self._clean_crex_card_text(text, href)
+        if not text:
+            return
+        seen.add(key)
+        match_number = self._extract_crex_match_number(href, text)
+        live_scan = text[:360]
+        cards.append(
+            {
+                "url": full_url,
+                "href": href,
+                "text": text,
+                "match_number": str(match_number) if match_number is not None else "",
+                "is_live": "1" if re.search(r"\blive\b", live_scan, flags=re.IGNORECASE) else "0",
+                "extractor": extractor,
+            }
+        )
+
+    def _html_to_text(self, html_text: str) -> str:
+        text = re.sub(r"(?is)<script.*?>.*?</script>", " ", html_text or " ")
+        text = re.sub(r"(?is)<style.*?>.*?</style>", " ", text)
+        text = re.sub(r"(?s)<[^>]+>", " ", text)
+        text = unescape(text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _clean_crex_card_text(self, text: str, href: str) -> str:
+        text = re.sub(r"\s+", " ", text or "").strip()
+        if not text:
+            return ""
+
+        # Context fallback can include neighboring cards. Trim around obvious match
+        # number/team/score signals when possible while preserving enough text for
+        # the LLM to phrase the score.
+        match_number = self._extract_crex_match_number(href, text)
+        if match_number is not None:
+            marker = re.search(rf"\b{match_number}(?:st|nd|rd|th)\b", text, flags=re.IGNORECASE)
+            if marker:
+                text = text[max(0, marker.start() - 180): marker.end() + 520].strip()
+        live_marker = re.search(r"\bLive\b", text, flags=re.IGNORECASE)
+        if live_marker:
+            text = text[max(0, live_marker.start() - 180): live_marker.end() + 520].strip()
+
+        return text[:1200]
+
+    def _extract_crex_match_number(self, href: str, text: str) -> Optional[int]:
+        combined = f"{href} {text}"
+        match = re.search(r"\b(\d{1,3})(?:st|nd|rd|th)[-\s]*(?:match|t20|ipl)\b", combined, flags=re.IGNORECASE)
+        if not match:
+            match = re.search(r"\b(\d{1,3})(?:st|nd|rd|th)\b", combined, flags=re.IGNORECASE)
+        if not match:
+            return None
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+
+    def _select_crex_live_match_card(self, cards: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
+        if not cards:
+            return None
+        live_cards = [
+            card for card in cards
+            if card.get("is_live") == "1" and re.search(r"\b\d{1,3}/\d{1,2}\b", card.get("text", ""))
+        ]
+        if live_cards:
+            return live_cards[0]
+
+        numbered = []
+        for card in cards:
+            try:
+                numbered.append((int(card.get("match_number") or "0"), card))
+            except ValueError:
+                continue
+        if len(numbered) >= 3:
+            numbered.sort(key=lambda item: item[0])
+            return numbered[len(numbered) // 2][1]
+        if len(cards) >= 3:
+            return cards[len(cards) // 2]
+        return cards[0]
+
+    def _summarize_crex_match_card(self, query: str, selected: Dict[str, str], cards: List[Dict[str, str]]) -> str:
+        provider = self.cricket_llm_provider or "gemini"
+        surrounding = "\n".join(
+            f"- match {card.get('match_number') or '?'}: {card.get('text', '')}"
+            for card in cards[:5]
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You parse raw CREX cricket match-card text. Use only the provided card text. "
+                    "Do not browse, do not guess, and do not mention implementation details. "
+                    "Answer in one or two short sentences with teams, scores, overs, and live/result state."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"User request: {query}\n"
+                    f"Selected current/live card: {selected.get('text', '')}\n"
+                    f"Selected URL: {selected.get('url', '')}\n"
+                    f"Nearby cards for context:\n{surrounding}"
+                ),
+            },
+        ]
+        try:
+            return self.llm_collect_text(
+                messages,
+                max_output_tokens=140,
+                forced_provider=provider,
+            ).strip()
+        except TypeError:
+            try:
+                return self.llm_collect_text(messages, max_output_tokens=140).strip()
+            except Exception:
+                return ""
+        except Exception:
+            return ""
+
+    def _format_crex_match_card_deterministically(self, selected: Dict[str, str]) -> str:
+        text = re.sub(r"\s+", " ", selected.get("text", "")).strip()
+        if not text:
+            return ""
+        live_parts = re.split(r"\bLive\b", text, maxsplit=1, flags=re.IGNORECASE)
+        if len(live_parts) == 2:
+            left = live_parts[0].strip()
+            right = live_parts[1].strip()
+            return f"Live IPL score: {left}; {right}."
+        if re.search(r"\bwon\b", text, flags=re.IGNORECASE):
+            return f"IPL result: {text}."
+        return f"IPL score snapshot: {text}."
+
+    def _handle_cricket_query_llm(self, query: str) -> Tuple[Optional[str], Optional[str]]:
+        provider = self.cricket_llm_provider or "gemini"
+        normalized = self._normalize(query)
+        wants_live = self._is_cricket_live_query(normalized)
+        mode = "live score" if wants_live else "recent/past result"
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are CALCIE's grounded cricket assistant. Use current web-grounded information only. "
+                    "Answer only with the requested live score or match result details. "
+                    "If the request is live, include teams, score, overs, and current state. "
+                    "If the request is a completed or past match result, include teams, winner, margin, and scores. "
+                    "If the exact requested match/date is unclear, say what you found most likely and mention the uncertainty briefly. "
+                    "Respond in 2 to 4 short sentences."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"User request: {query}\n"
+                    f"Mode: {mode}\n"
+                    "Use grounded live web information."
+                ),
+            },
+        ]
+        try:
+            response = self.llm_collect_text(
+                messages,
+                max_output_tokens=220,
+                forced_provider=provider,
+                enable_web_grounding=True,
+            ).strip()
+        except TypeError:
+            try:
+                response = self.llm_collect_text(
+                    messages,
+                    max_output_tokens=220,
+                    forced_provider=provider,
+                ).strip()
+            except Exception:
+                return None, None
+        except Exception:
+            return None, None
+
+        if not self._is_cricket_llm_answer_usable(response, wants_live=wants_live):
+            return None, None
+        spoken = response.split("\n", 1)[0].strip()
+        return response, spoken
+
+    def _run_cricket_vision_summary(self, query: str, wants_live: bool) -> Tuple[str, Dict]:
+        best_result: Dict = {}
+        best_text = ""
+        for attempt in range(self.cricket_vision_attempts):
+            if attempt > 0:
+                time.sleep(min(4.0, 1.5 + attempt))
+            goal = self._build_cricket_vision_goal(query=query, wants_live=wants_live)
+            result = self.vision_skill.run_once_result(goal, source="search")
+            text = str(result.get("summary") or result.get("alert_message") or "").strip()
+            if text and not best_text:
+                best_text = text
+                best_result = result
+            if self._looks_like_cricket_score_summary(text, wants_live=wants_live):
+                return text, result
+        if best_text:
+            return best_text, best_result
+        return "I opened the cricket page, but I could not read a reliable visible score yet.", best_result or {}
+
+    def _looks_like_cricket_score_summary(self, text: str, wants_live: bool) -> bool:
+        lowered = (text or "").lower()
+        if not lowered:
+            return False
+        has_score = bool(re.search(r"\b\d{1,3}\s*/\s*\d{1,2}\b", lowered))
+        has_overs = "over" in lowered or re.search(r"\b\d{1,2}(?:\.\d)?\s*ov\b", lowered)
+        has_result = "won by" in lowered or "defeated" in lowered or "beat " in lowered or "results" in lowered
+        has_match_words = any(term in lowered for term in {"match", "innings", "wickets", "runs", "score"})
+        if wants_live:
+            return bool(has_score and (has_overs or has_match_words))
+        return bool((has_score and has_result) or has_result)
+
+    def _is_cricket_llm_answer_usable(self, text: str, wants_live: bool) -> bool:
+        lowered = (text or "").strip().lower()
+        if not lowered:
+            return False
+        weak_markers = {
+            "i couldn't",
+            "i could not",
+            "i can't",
+            "unable to",
+            "not getting a reliable",
+            "check the official",
+            "visit the official",
+            "model error",
+        }
+        if any(marker in lowered for marker in weak_markers):
+            return False
+        has_score = bool(re.search(r"\b\d{1,3}\s*/\s*\d{1,2}\b", lowered))
+        has_overs = "over" in lowered or bool(re.search(r"\b\d{1,2}(?:\.\d)?\s*ov", lowered))
+        has_result = "won by" in lowered or "beat " in lowered or "defeated" in lowered
+        if wants_live:
+            return has_score and (has_overs or "wickets" in lowered or "innings" in lowered)
+        return (has_score and has_result) or has_result
+
+    def _build_cricket_vision_goal(self, query: str, wants_live: bool) -> str:
+        cleaned_query = re.sub(r"\s+", " ", (query or "").strip())
+        if wants_live:
+            return (
+                "Analyze this live cricket score page for the user's request: "
+                f"'{cleaned_query}'. Identify the most relevant visible live cricket or IPL match and summarize "
+                "the teams, current score, wickets, overs, and current match state. If the requested match is not "
+                "visible on screen yet, say that clearly instead of guessing."
+            )
+        return (
+            "Analyze this IPL completed matches results page for the user's request: "
+            f"'{cleaned_query}'. Read the visible match cards carefully, including date, teams, scores, and result "
+            "margin. If the requested date, team, or match is visible, answer with the result and score clearly. "
+            "If only recent completed matches are visible, summarize those and say whether more scrolling may be needed."
+        )
 
     def _handle_weather_query(self, query: str) -> Tuple[Optional[str], Optional[str]]:
         location_query = self._extract_weather_location(query)
@@ -957,6 +1392,43 @@ class SearchingSkill:
             "tennis", "golf", "racing", "ipl", "cricket",
         }
         return any(term in normalized for term in sports_terms)
+
+    def _is_cricket_query(self, normalized: str) -> bool:
+        return any(term in normalized for term in {"ipl", "cricket"})
+
+    def _is_cricket_live_query(self, normalized: str) -> bool:
+        if not self._is_cricket_query(normalized):
+            return False
+        live_terms = {
+            "live",
+            "live score",
+            "score",
+            "scorecard",
+            "current score",
+            "current",
+            "now",
+            "today",
+            "ongoing",
+        }
+        return any(term in normalized for term in live_terms)
+
+    def _is_explicit_cricket_page_query(self, normalized: str) -> bool:
+        if not self._is_cricket_query(normalized):
+            return False
+        page_terms = {
+            "open",
+            "website",
+            "site",
+            "page",
+            "results page",
+            "live score page",
+            "crex",
+            "iplt20",
+            "check visually",
+            "look at",
+            "see the",
+        }
+        return any(term in normalized for term in page_terms)
 
     def _is_unsupported_espn_sport(self, normalized: str) -> bool:
         return any(term in normalized for term in {"ipl", "cricket", "bbl", "ranji"})

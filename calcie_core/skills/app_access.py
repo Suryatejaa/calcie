@@ -1,6 +1,7 @@
 """Skill: deterministic app access commands."""
 
 import json
+import html
 import re
 import subprocess
 import sys
@@ -50,6 +51,7 @@ class AppAccessSkill:
             "twitter": "https://x.com",
             "x": "https://x.com",
             "instagram": "https://www.instagram.com",
+            "insta":"https://www.instagram.com",
             "reddit": "https://www.reddit.com",
         }
         self.preferred_media_browser = "chrome"
@@ -338,7 +340,7 @@ class AppAccessSkill:
             return None
         compact = re.sub(r"\s+", " ", raw).strip()
         match = re.match(
-            r"^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?P<action>play|pause|resume|continue)\b\s*(?P<body>.*)$",
+            r"^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?P<action>play|pause|resume|continue|skip|next|previous|prev|back|restart)\b(?:\s+(?:song|track|video))?\b\s*(?P<body>.*)$",
             compact,
             flags=re.IGNORECASE,
         )
@@ -361,6 +363,24 @@ class AppAccessSkill:
             player_result = self._handle_play_command_via_calcie_player(action, body)
             if player_result:
                 return player_result
+
+        if action in {"skip", "next"}:
+            advanced = self._trigger_system_media_command(19)
+            if advanced:
+                return "Skipping to the next media item..."
+            return "Skip is ready in CALCIE Player. Open the player and try again."
+
+        if action in {"previous", "prev", "back"}:
+            rewound = self._trigger_system_media_command_repeat(20, repeat=2, delay_s=0.12)
+            if rewound:
+                return "Going to the previous track..."
+            return "Previous is ready in CALCIE Player. Open the player and try again."
+
+        if action == "restart" or (action == "play" and lowered in {"again", "it again", "song again", "track again"}):
+            restarted = self._trigger_system_media_command(20)
+            if restarted:
+                return "Restarting the current track from the beginning..."
+            return "Restart is ready in CALCIE Player. Open the player and try again."
 
         # OTT intentionally deferred for now.
         ott_markers = ["netflix", "prime", "prime video", "hotstar", "disney", "zee5", "sony liv", "jio cinema"]
@@ -438,6 +458,102 @@ class AppAccessSkill:
             prefer_existing_browser=True,
         )
 
+    def _handle_media_control_command(self, user_input: str) -> Optional[str]:
+        raw = (user_input or "").strip()
+        if not raw:
+            return None
+
+        normalized = re.sub(r"\s+", " ", raw).strip().lower()
+        if not self._desktop_player_shell_available():
+            return None
+
+        if normalized in {"mute", "mute audio", "mute music"}:
+            if self._dispatch_desktop_player_command("mute", show_player=False):
+                return "Muting CALCIE Player..."
+            return None
+
+        if normalized in {"unmute", "unmute audio", "unmute music"}:
+            if self._dispatch_desktop_player_command("unmute", show_player=False):
+                return "Unmuting CALCIE Player..."
+            return None
+
+        if normalized in {"volume up", "increase volume", "raise volume", "louder"}:
+            if self._dispatch_desktop_player_command("volume_up", show_player=False):
+                return "Increasing CALCIE Player volume..."
+            return None
+
+        if normalized in {"volume down", "decrease volume", "lower volume", "softer"}:
+            if self._dispatch_desktop_player_command("volume_down", show_player=False):
+                return "Decreasing CALCIE Player volume..."
+            return None
+
+        volume_match = re.match(r"^(?:set\s+)?volume(?:\s+to)?\s+(\d{1,3})\s*%?$", normalized)
+        if volume_match:
+            volume_percent = max(0, min(100, int(volume_match.group(1))))
+            if self._dispatch_desktop_player_command(
+                "set_volume",
+                subtitle=f"{volume_percent}",
+                show_player=False,
+            ):
+                return f"Setting CALCIE Player volume to {volume_percent}%..."
+            return None
+
+        if normalized in {"speed up", "faster", "increase speed"}:
+            if self._dispatch_desktop_player_command("speed_up", show_player=False):
+                return "Increasing CALCIE Player speed..."
+            return None
+
+        if normalized in {"slow down", "slower", "decrease speed"}:
+            if self._dispatch_desktop_player_command("speed_down", show_player=False):
+                return "Decreasing CALCIE Player speed..."
+            return None
+
+        speed_match = re.match(
+            r"^(?:set\s+)?(?:playback\s+)?speed(?:\s+to)?\s+([0-9]+(?:\.[0-9]+)?)x?$",
+            normalized,
+        )
+        if speed_match:
+            speed_value = float(speed_match.group(1))
+            speed_value = max(0.25, min(3.0, speed_value))
+            if self._dispatch_desktop_player_command(
+                "set_speed",
+                subtitle=f"{speed_value:.2f}",
+                show_player=False,
+            ):
+                pretty = ("%g" % speed_value)
+                return f"Setting CALCIE Player speed to {pretty}x..."
+            return None
+
+        seek_forward_match = re.match(
+            r"^(?:seek\s+)?(?:forward|skip ahead)\s+(\d{1,3})\s*(?:seconds?|secs?|s)?$",
+            normalized,
+        )
+        if seek_forward_match:
+            seconds = max(1, min(600, int(seek_forward_match.group(1))))
+            if self._dispatch_desktop_player_command(
+                "seek_forward",
+                subtitle=str(seconds),
+                show_player=False,
+            ):
+                return f"Seeking forward {seconds} seconds in CALCIE Player..."
+            return None
+
+        seek_backward_match = re.match(
+            r"^(?:seek\s+)?(?:backward|rewind|back)\s+(\d{1,3})\s*(?:seconds?|secs?|s)?$",
+            normalized,
+        )
+        if seek_backward_match:
+            seconds = max(1, min(600, int(seek_backward_match.group(1))))
+            if self._dispatch_desktop_player_command(
+                "seek_backward",
+                subtitle=str(seconds),
+                show_player=False,
+            ):
+                return f"Seeking backward {seconds} seconds in CALCIE Player..."
+            return None
+
+        return None
+
     def _handle_play_command_via_calcie_player(self, action: str, body: str) -> Optional[str]:
         if sys.platform != "darwin" or not self.desktop_player_enabled:
             return None
@@ -450,19 +566,29 @@ class AppAccessSkill:
                 return "Pausing CALCIE Player..."
             return None
 
+        if action in {"skip", "next"}:
+            if self._dispatch_desktop_player_command("next", show_player=False):
+                return "Skipping to the next item in CALCIE Player..."
+            return None
+
+        if action in {"previous", "prev", "back"}:
+            if self._dispatch_desktop_player_command("previous_track", show_player=False):
+                return "Going to the previous track in CALCIE Player..."
+            return None
+
+        if action == "restart" or (action == "play" and lowered in {"again", "it again", "song again", "track again"}):
+            if self._dispatch_desktop_player_command("restart_current", show_player=False):
+                return "Restarting the current track in CALCIE Player..."
+            return None
+
         if action in {"resume", "continue"} and (not lowered or "music" in lowered):
             if self._dispatch_desktop_player_command("play", show_player=False):
                 return "Resuming CALCIE Player..."
             return None
 
         if lowered in {"", "music", "songs", "song", "my music", "some music"}:
-            if self._dispatch_desktop_player_command(
-                "load",
-                url="https://music.youtube.com",
-                title="YouTube Music",
-                subtitle="Opening YouTube Music inside CALCIE Player.",
-            ):
-                return "Opening YouTube Music in CALCIE Player..."
+            if self._dispatch_desktop_player_command("play", show_player=True):
+                return "Resuming CALCIE Player..."
             return None
 
         if lowered in {"youtube", "yt"}:
@@ -471,6 +597,7 @@ class AppAccessSkill:
                 url="https://www.youtube.com",
                 title="YouTube",
                 subtitle="Opening YouTube home inside CALCIE Player.",
+                platform="youtube",
             ):
                 return "Opening YouTube in CALCIE Player..."
             return None
@@ -481,6 +608,7 @@ class AppAccessSkill:
                 url="https://music.youtube.com",
                 title="YouTube Music",
                 subtitle="Opening YouTube Music inside CALCIE Player.",
+                platform="ytmusic",
             ):
                 return "Opening YouTube Music in CALCIE Player..."
             return None
@@ -500,6 +628,7 @@ class AppAccessSkill:
                     url="https://www.youtube.com",
                     title="YouTube",
                     subtitle="Opening YouTube inside CALCIE Player.",
+                    platform="youtube",
                 ):
                     return "Opening YouTube in CALCIE Player..."
                 return None
@@ -513,6 +642,8 @@ class AppAccessSkill:
                 url=target_url,
                 title=f"YouTube: {query}",
                 subtitle="Playing in CALCIE Player via the shared desktop media surface.",
+                platform="youtube",
+                query=query,
             ):
                 return f"Playing {query} in CALCIE Player..."
             return None
@@ -523,6 +654,7 @@ class AppAccessSkill:
                 url="https://music.youtube.com",
                 title="YouTube Music",
                 subtitle="Opening YouTube Music inside CALCIE Player.",
+                platform="ytmusic",
             ):
                 return "Opening YouTube Music in CALCIE Player..."
             return None
@@ -534,6 +666,8 @@ class AppAccessSkill:
             url=target_url,
             title=f"YouTube Music: {query}",
             subtitle="Playing in CALCIE Player via the shared desktop media surface.",
+            platform="ytmusic",
+            query=query,
         ):
             return f"Playing {query} in CALCIE Player..."
         return None
@@ -567,6 +701,8 @@ class AppAccessSkill:
         url: Optional[str] = None,
         title: Optional[str] = None,
         subtitle: Optional[str] = None,
+        platform: Optional[str] = None,
+        query: Optional[str] = None,
         show_player: bool = True,
     ) -> bool:
         payload = {
@@ -576,6 +712,8 @@ class AppAccessSkill:
             "url": url or "",
             "title": title or "",
             "subtitle": subtitle or "",
+            "platform": platform or "",
+            "query": query or "",
             "show_player": bool(show_player),
         }
         try:
@@ -744,6 +882,10 @@ class AppAccessSkill:
         except Exception:
             return None
 
+        candidates = self._extract_ranked_youtube_candidates(html, query)
+        if candidates:
+            return f"https://www.youtube.com/watch?v={candidates[0]['video_id']}&autoplay=1"
+
         seen = set()
         for vid in re.findall(r"\"videoId\":\"([a-zA-Z0-9_-]{11})\"", html):
             if vid in seen:
@@ -761,6 +903,83 @@ class AppAccessSkill:
             return None
         vid = match.group(1)
         return f"https://music.youtube.com/watch?v={vid}&autoplay=1"
+
+    def _extract_ranked_youtube_candidates(self, html_text: str, query: str) -> list:
+        candidates = []
+        seen = set()
+        query_terms = self._media_query_terms(query)
+        pattern = re.compile(
+            r'"videoId":"(?P<video_id>[A-Za-z0-9_-]{11})".{0,900}?"title":\{"runs":\[\{"text":"(?P<title>.*?)"\}\]',
+            flags=re.DOTALL,
+        )
+
+        for match in pattern.finditer(html_text):
+            video_id = match.group("video_id")
+            if video_id in seen:
+                continue
+            seen.add(video_id)
+            raw_title = match.group("title") or ""
+            title = html.unescape(raw_title).replace("\\u0026", "&").replace('\\"', '"').strip()
+            score = self._score_youtube_candidate(query_terms, title)
+            candidates.append(
+                {
+                    "video_id": video_id,
+                    "title": title,
+                    "score": score,
+                }
+            )
+
+        candidates.sort(key=lambda item: item["score"], reverse=True)
+        return candidates
+
+    def _media_query_terms(self, query: str) -> list:
+        lowered = (query or "").lower()
+        lowered = re.sub(r"[^a-z0-9\s]", " ", lowered)
+        terms = [term for term in lowered.split() if len(term) > 1]
+        return terms
+
+    def _score_youtube_candidate(self, query_terms: list, title: str) -> int:
+        lowered_title = (title or "").lower()
+        score = 0
+
+        for term in query_terms:
+            if lowered_title == term:
+                score += 8
+            elif lowered_title.startswith(term + " "):
+                score += 6
+            elif re.search(rf"\b{re.escape(term)}\b", lowered_title):
+                score += 4
+            elif term in lowered_title:
+                score += 2
+
+        phrase = " ".join(query_terms).strip()
+        if phrase:
+            if phrase == lowered_title:
+                score += 24
+            elif phrase in lowered_title:
+                score += 12
+
+        quality_hints = {
+            "official video": 10,
+            "official music video": 10,
+            "lyric video": 3,
+            "audio": 2,
+            "topic": 1,
+            "live": -2,
+            "reaction": -8,
+            "cover": -6,
+            "karaoke": -8,
+            "slowed": -5,
+            "reverb": -5,
+            "remix": -4,
+            "8d": -8,
+            "shorts": -4,
+        }
+        for hint, weight in quality_hints.items():
+            if hint in lowered_title:
+                score += weight
+
+        return score
 
     def _escape_applescript(self, text: str) -> str:
         return (text or "").replace("\\", "\\\\").replace('"', '\\"')
@@ -1000,6 +1219,39 @@ class AppAccessSkill:
         except Exception:
             return False
 
+    def _trigger_system_media_command(self, key_code: int) -> bool:
+        if sys.platform != "darwin":
+            return False
+        try:
+            proc = subprocess.run(
+                ["osascript", "-e", f'tell application "System Events" to key code {key_code}'],
+                capture_output=True,
+                text=True,
+            )
+            return proc.returncode == 0
+        except Exception:
+            return False
+
+    def _trigger_system_media_command_repeat(self, key_code: int, repeat: int = 2, delay_s: float = 0.12) -> bool:
+        if sys.platform != "darwin":
+            return False
+        try:
+            repeat = max(1, int(repeat))
+            script_lines = ['tell application "System Events"']
+            for index in range(repeat):
+                script_lines.append(f"key code {int(key_code)}")
+                if index < repeat - 1:
+                    script_lines.append(f"delay {float(delay_s):.2f}")
+            script_lines.append("end tell")
+            proc = subprocess.run(
+                ["osascript", "-e", "\n".join(script_lines)],
+                capture_output=True,
+                text=True,
+            )
+            return proc.returncode == 0
+        except Exception:
+            return False
+
     def _build_media_app_preferences(self) -> Dict[str, list]:
         ytm_custom = (os.environ.get("CALCIE_YTMUSIC_APP_NAME") or "").strip()
         yt_custom = (os.environ.get("CALCIE_YOUTUBE_APP_NAME") or "").strip()
@@ -1097,6 +1349,10 @@ class AppAccessSkill:
         play_result = self._handle_play_command(user_input)
         if play_result is not None:
             return play_result, play_result
+
+        media_control_result = self._handle_media_control_command(user_input)
+        if media_control_result is not None:
+            return media_control_result, media_control_result
 
         target_in_app = self._extract_open_target_in_app_command(user_input)
         if target_in_app:

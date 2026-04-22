@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CALCIE Setup Guide</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="../index.html"><span class="brand-mark">C</span><span>CALCIE</span></a></header>
+  <main class="doc-page">
+    <p class="eyebrow">Setup</p>
+    <h1>Install CALCIE for macOS</h1>
+    <ol class="steps">
+      <li>Download the signed DMG from the release page.</li>
+      <li>Drag <strong>CALCIE.app</strong> into Applications.</li>
+      <li>Open CALCIE from Applications, not from the build folder.</li>
+      <li>Grant Microphone, Accessibility, Screen Recording, and Notifications when prompted.</li>
+      <li>Use Advanced Options to import ChatGPT memory if you want continuity.</li>
+    </ol>
+
+    <section class="doc-card">
+      <h2>First-run memory import</h2>
+      <p>CALCIE can start empty. If you want it to remember context from ChatGPT, copy the prompt inside Advanced Options, paste it into ChatGPT, then paste the fenced response back into CALCIE.</p>
+      <p>The import stays local by default in <code>calcie_profile.local.json</code> and <code>.calcie/profile_imports/</code>.</p>
+    </section>
+
+    <section class="doc-card">
+      <h2>Permissions</h2>
+      <ul>
+        <li><strong>Microphone:</strong> push-to-talk voice capture.</li>
+        <li><strong>Accessibility:</strong> controlled keyboard/mouse actions you request.</li>
+        <li><strong>Screen Recording:</strong> screen vision and screen memory.</li>
+        <li><strong>Notifications:</strong> alerts and update messages.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

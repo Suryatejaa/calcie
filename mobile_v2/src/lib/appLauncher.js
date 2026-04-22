@@ -35,6 +35,13 @@ const APP_ROUTES = [
     fallbackUrl: "https://www.instagram.com",
   },
   {
+    regex: /\binsta\b|\big\b/,
+    name: "Insta",
+    packageName: "com.instagram.android",
+    appUrls: ["instagram://app"],
+    fallbackUrl: "https://www.instagram.com",
+  },
+  {
     regex: /\bspotify\b/,
     name: "Spotify",
     packageName: "com.spotify.music",
