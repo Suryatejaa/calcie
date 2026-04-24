@@ -30,7 +30,7 @@ import asyncio
 import subprocess
 import edge_tts
 from dotenv import load_dotenv
-from calcie_core.orchestration import CommandArbiter
+from calcie_core.orchestration import CommandArbiter, LocalCommandInterpreter
 from calcie_core.prompts import (
     GENERAL_CHAT_PROMPT,
     PROFILE_CHAT_PROMPT,
@@ -253,6 +253,9 @@ class Calcie:
         "code": "vscode",
         "slack": "slack",
         "discord": "discord",
+        "instagram": "instagram",
+        "insta": "instagram",
+        "ig": "instagram",
         "voice memos": "voice memos",
         "voice memo": "voice memos",
         "voicememos": "voice memos",
@@ -388,6 +391,7 @@ class Calcie:
             ambiguous_delta=self.router_ambiguous_delta,
             leading_correction_threshold=self.router_leading_fix_threshold,
         )
+        self.local_command_interpreter = LocalCommandInterpreter()
         self.calcie_data_dir = self.project_root / ".calcie"
         preferred_gemini_model = os.environ.get("GEMINI_MODEL", "gemini-robotics-er-1.5-preview")
         self.gemini_models = []
@@ -759,16 +763,100 @@ class Calcie:
             self.speak(bridge)
         self.speak(text)
 
-    def _build_local_profile_answer(self) -> str:
-        points = []
+    def _profile_memory_text(self) -> str:
         profile = self.profile_data if isinstance(self.profile_data, dict) else {}
+        raw_import = profile.get("memory_import")
+        if isinstance(raw_import, dict):
+            text = str(raw_import.get("text") or "").strip()
+            if text:
+                return text
+        import_path = self._profile_import_path()
+        try:
+            if import_path.exists():
+                return import_path.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+        return ""
 
-        name = str(profile.get("name") or "").strip()
+    def _extract_profile_line(self, text: str, label: str) -> str:
+        if not text:
+            return ""
+        match = re.search(rf"(?im)^{re.escape(label)}\s*:\s*(.+?)\s*$", text)
+        if not match:
+            return ""
+        return re.sub(r"\s+", " ", match.group(1)).strip(" -\t")
+
+    def _extract_profile_section_items(self, text: str, heading: str, limit: int = 3) -> list:
+        if not text:
+            return []
+        items = []
+        collecting = False
+        heading_marker = f"{heading.strip().lower()}:"
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not collecting:
+                if line.lower() == heading_marker:
+                    collecting = True
+                continue
+            if not line:
+                continue
+            if line.endswith(":") and not line.startswith("-"):
+                break
+            cleaned = re.sub(r"\s+", " ", line).strip()
+            cleaned = cleaned.lstrip("- ").strip()
+            if not cleaned:
+                continue
+            items.append(cleaned)
+            if len(items) >= limit:
+                break
+        return items
+
+    def _build_local_profile_answer(self, user_query: str = "") -> str:
+        points = []
+        normalized_query = self._normalize_text(user_query)
+        profile = self.profile_data if isinstance(self.profile_data, dict) else {}
+        memory_text = self._profile_memory_text()
+
+        name = str(profile.get("name") or "").strip() or self._extract_profile_line(memory_text, "Name")
         job = str(profile.get("job") or "").strip()
-        location = str(profile.get("location") or "").strip()
+        location = str(profile.get("location") or "").strip() or self._extract_profile_line(memory_text, "Location")
         projects = profile.get("projects") if isinstance(profile.get("projects"), list) else []
         goals = profile.get("goals") if isinstance(profile.get("goals"), list) else []
         devices = profile.get("devices") if isinstance(profile.get("devices"), list) else []
+
+        role_items = self._extract_profile_section_items(memory_text, "Current Role", limit=2)
+        if role_items and not job:
+            job = role_items[0]
+        imported_projects = self._extract_profile_section_items(memory_text, "Past Attempts", limit=3)
+        if imported_projects and not projects:
+            projects = imported_projects
+        imported_goals = self._extract_profile_section_items(memory_text, "Core Goal", limit=3)
+        if imported_goals and not goals:
+            goals = imported_goals
+        learning = self._extract_profile_section_items(memory_text, "Learning Interests", limit=4)
+        strengths = self._extract_profile_section_items(memory_text, "Strengths", limit=3)
+        constraints = self._extract_profile_section_items(memory_text, "Constraints", limit=3)
+        dream_identity = self._extract_profile_section_items(memory_text, "Dream Identity", limit=3)
+        mindset = self._extract_profile_section_items(memory_text, "Mindset", limit=2)
+
+        if any(phrase in normalized_query for phrase in {"say my name", "what is my name", "whats my name"}):
+            if name:
+                return f"Your name is {name}."
+            return ""
+
+        if "who am i" in normalized_query:
+            who_parts = []
+            if name:
+                who_parts.append(name)
+            if job:
+                who_parts.append(job)
+            if goals:
+                who_parts.append(f"building toward {goals[0]}")
+            if location:
+                who_parts.append(f"from {location}")
+            if who_parts:
+                return "You are " + ", ".join(who_parts) + "."
+            return ""
 
         if name:
             points.append(f"Name: {name}.")
@@ -782,6 +870,16 @@ class Calcie:
             points.append(f"Goals: {', '.join(str(g) for g in goals[:3])}.")
         if devices:
             points.append(f"Devices: {', '.join(str(d) for d in devices[:3])}.")
+        if learning:
+            points.append(f"Learning focus: {', '.join(str(item) for item in learning[:4])}.")
+        if strengths:
+            points.append(f"Strengths: {', '.join(str(item) for item in strengths[:3])}.")
+        if constraints:
+            points.append(f"Current constraints: {', '.join(str(item) for item in constraints[:3])}.")
+        if dream_identity:
+            points.append(f"Dream identity: {', '.join(str(item) for item in dream_identity[:3])}.")
+        if mindset:
+            points.append(f"Mindset: {'; '.join(str(item) for item in mindset[:2])}.")
 
         fact_lines = [str(f).strip() for f in self.facts if str(f).strip()][:3]
         if fact_lines:
@@ -1031,16 +1129,17 @@ class Calcie:
         return None, None
 
     def _dispatch_skill_command(self, user_input: str):
-        strict_flags = self._strict_route_flags(user_input)
-        decision = self.command_arbiter.decide(user_input, strict_flags)
+        interpreted_input = self.local_command_interpreter.rewrite(user_input)
+        strict_flags = self._strict_route_flags(interpreted_input)
+        decision = self.command_arbiter.decide(interpreted_input, strict_flags)
         default_order = ["vision", "coding", "agentic", "app", "computer", "search"]
         rewritten = (decision.rewritten_input or "").strip()
-        rewritten_changed = bool(rewritten and rewritten != (user_input or "").strip())
+        rewritten_changed = bool(rewritten and rewritten != interpreted_input.strip())
 
         if decision.route in default_order:
             route_order = [decision.route] + [r for r in default_order if r != decision.route]
             for route in route_order:
-                route_input = rewritten if route == decision.route and rewritten_changed else user_input
+                route_input = rewritten if route == decision.route and rewritten_changed else interpreted_input
                 response, speak = self._execute_skill_route(route, route_input)
                 if response is not None:
                     self._print_route_trace(route, decision, rewritten_changed)
@@ -1055,7 +1154,7 @@ class Calcie:
                     return response, speak
 
         for route in default_order:
-            response, speak = self._execute_skill_route(route, user_input)
+            response, speak = self._execute_skill_route(route, interpreted_input)
             if response is not None:
                 self._print_route_trace(route, decision, False)
                 return response, speak
@@ -1634,7 +1733,7 @@ class Calcie:
             return skill_response
 
         if profile_query:
-            local_profile_answer = self._build_local_profile_answer()
+            local_profile_answer = self._build_local_profile_answer(user_input)
             if local_profile_answer:
                 print(f"\033[94mCalcie:\033[0m {local_profile_answer}")
                 self._speak_with_bridge("profile", local_profile_answer, preempt=True)

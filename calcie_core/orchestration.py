@@ -58,7 +58,7 @@ class CommandArbiter:
         "app": {
             "open", "launch", "start", "play", "resume", "continue",
             "chrome", "safari", "spotify", "youtube", "yt", "ytmusic",
-            "whatsapp", "instagram","insta" "discord", "slack",
+            "whatsapp", "instagram", "insta", "discord", "slack",
         },
         "computer": {
             "control", "computer", "click", "double", "right", "scroll",
@@ -212,3 +212,101 @@ class CommandArbiter:
         tail = parts[1] if len(parts) > 1 else ""
         rewritten = f"{best_canonical} {tail}".strip()
         return rewritten, best_route, best_score
+
+
+class LocalCommandInterpreter:
+    """Rewrite natural phrasing into CALCIE-native commands without using an LLM."""
+
+    def rewrite(self, user_input: str) -> str:
+        raw = (user_input or "").strip()
+        if not raw:
+            return raw
+
+        normalized = self._normalize(raw)
+        if not normalized:
+            return raw
+
+        explicit_prefixes = (
+            "vision ",
+            "monitor ",
+            "screen monitor ",
+            "screen vision ",
+            "control ",
+            "computer ",
+            "open ",
+            "launch ",
+            "start ",
+            "play ",
+            "search ",
+            "code ",
+            "order ",
+            "buy ",
+        )
+        if normalized.startswith(explicit_prefixes):
+            return raw
+
+        rewritten = (
+            self._rewrite_vision_command(raw, normalized)
+            or self._rewrite_control_command(raw, normalized)
+        )
+        return rewritten or raw
+
+    def _normalize(self, text: str) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", (text or "").lower())).strip()
+
+    def _rewrite_vision_command(self, raw: str, normalized: str) -> Optional[str]:
+        if re.search(r"\b(stop|end|disable)\b", normalized) and re.search(
+            r"\b(vision|monitor|watching|screen monitoring|screen watch)\b", normalized
+        ):
+            return "vision stop"
+
+        monitor_match = re.search(
+            r"\b(?:watch|monitor|keep watching|keep an eye on)\s+(?:my\s+)?screen\s+for\s+(.+)$",
+            normalized,
+        )
+        if monitor_match:
+            goal = monitor_match.group(1).strip()
+            if goal:
+                return f"vision start {goal}"
+
+        if "screen" not in normalized:
+            return None
+
+        once_markers = (
+            "check", "look", "see", "detect", "inspect", "analyze",
+            "tell me if", "is there", "does this", "whether", "find",
+        )
+        if any(marker in normalized for marker in once_markers):
+            return f"vision once {raw}"
+        return None
+
+    def _rewrite_control_command(self, raw: str, normalized: str) -> Optional[str]:
+        screenshot_markers = {
+            "take screenshot",
+            "capture screenshot",
+            "take a screenshot",
+            "capture the screen",
+        }
+        if any(marker in normalized for marker in screenshot_markers):
+            return "screenshot"
+
+        if "scroll" in normalized:
+            direction = "down"
+            if re.search(r"\bup\b", normalized):
+                direction = "up"
+            amount = 600
+            if re.search(r"\b(a bit|little|slightly)\b", normalized):
+                amount = 300
+            elif re.search(r"\bmore\b", normalized):
+                amount = 900
+            explicit_amount = re.search(r"\b(\d{2,4})\b", normalized)
+            if explicit_amount:
+                amount = int(explicit_amount.group(1))
+            return f"control scroll {direction} {amount}"
+
+        type_match = re.match(r"^(?:enter|type|write)\s+(.+)$", raw.strip(), flags=re.IGNORECASE)
+        if type_match:
+            text = type_match.group(1).strip()
+            if text:
+                return f"control type {text}"
+        return None

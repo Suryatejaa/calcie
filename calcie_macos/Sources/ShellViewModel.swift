@@ -270,18 +270,18 @@ final class ShellViewModel: ObservableObject {
         }
     }
 
-    func submitTypedCommand() {
-        let command = typedCommand.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !command.isEmpty, !isSubmittingCommand else { return }
+    func submitTypedCommand(asVision: Bool = false) {
+        let rawCommand = typedCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawCommand.isEmpty, !isSubmittingCommand else { return }
         typedCommand = ""
-        submitCommand(command, addToChat: false)
+        submitCommand(resolvedCommandText(rawCommand, asVision: asVision), addToChat: false)
     }
 
-    func submitChatMessage() {
-        let command = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !command.isEmpty, !isSubmittingCommand else { return }
+    func submitChatMessage(asVision: Bool = false) {
+        let rawCommand = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawCommand.isEmpty, !isSubmittingCommand else { return }
         chatInput = ""
-        submitCommand(command, addToChat: true)
+        submitCommand(resolvedCommandText(rawCommand, asVision: asVision), addToChat: true)
     }
 
     func clearChat() {
@@ -338,6 +338,16 @@ final class ShellViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    private func resolvedCommandText(_ raw: String, asVision: Bool) -> String {
+        let command = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard asVision else { return command }
+        let normalized = command.lowercased()
+        if normalized.hasPrefix("vision ") {
+            return command
+        }
+        return "vision once \(command)"
     }
 
     func toggleVoice() {

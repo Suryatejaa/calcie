@@ -8,6 +8,7 @@ APP_SOURCE="${REPO_ROOT}/dist/CALCIE.app"
 APP_TARGET_DIR="${HOME}/Applications"
 APP_TARGET="${APP_TARGET_DIR}/CALCIE.app"
 OPEN_AFTER_INSTALL="${CALCIE_OPEN_AFTER_INSTALL:-1}"
+APP_BUNDLE_ID="com.suryateja.calcie"
 
 if [[ ! -x "${BUILD_SCRIPT}" ]]; then
   echo "Missing build script: ${BUILD_SCRIPT}" >&2
@@ -21,6 +22,16 @@ if [[ ! -d "${APP_SOURCE}" ]]; then
   echo "Built app bundle not found at ${APP_SOURCE}" >&2
   exit 1
 fi
+
+echo "Closing any running CALCIE instance..."
+osascript -e "tell application id \"${APP_BUNDLE_ID}\" to quit" >/dev/null 2>&1 || true
+pkill -x "CALCIE" >/dev/null 2>&1 || true
+for _ in {1..20}; do
+  if ! pgrep -x "CALCIE" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.25
+done
 
 mkdir -p "${APP_TARGET_DIR}"
 rm -rf "${APP_TARGET}"

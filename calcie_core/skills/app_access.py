@@ -10,6 +10,7 @@ import urllib.request
 import webbrowser
 import os
 import uuid
+from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -32,6 +33,7 @@ class AppAccessSkill:
             "vscode": "Visual Studio Code",
             "slack": "Slack",
             "discord": "Discord",
+            "instagram": "Instagram",
             "voice memos": "Voice Memos",
             "voicememos": "VoiceMemos",
             "youtube music": "YouTube Music",
@@ -54,6 +56,7 @@ class AppAccessSkill:
             "insta":"https://www.instagram.com",
             "reddit": "https://www.reddit.com",
         }
+        self._alias_index = self._build_alias_index()
         self.preferred_media_browser = "chrome"
         self.media_reuse_browser_tabs = (
             os.environ.get("CALCIE_MEDIA_REUSE_BROWSER_TABS", "1").strip().lower()
@@ -78,6 +81,7 @@ class AppAccessSkill:
             "firefox": "org.mozilla.firefox",
             "visual studio code": "com.microsoft.VSCode",
             "spotify": "com.spotify.client",
+            "instagram": "com.burbn.instagram",
             "youtube music": "com.google.Chrome.app.aeblfdkhhhdcdjpifhhbdiojplfjncoa",
             "youtube": "com.google.Chrome.app.agimnkijcaahngcdmfeangaknmldooml",
         }
@@ -100,13 +104,13 @@ class AppAccessSkill:
         if not raw:
             return None
 
-        lowered = raw.lower()
-        normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", lowered)).strip()
+        normalized = self._normalize_alias_key(raw)
         if not normalized:
             return None
 
-        if normalized in self.app_aliases:
-            return self.app_aliases[normalized]
+        direct_alias = self._resolve_app_alias(normalized)
+        if direct_alias:
+            return direct_alias
 
         match = re.match(
             r"^(?:please\s+)?(?:(?:can|could)\s+you\s+)?(?:open|launch|start)\s+(?:the\s+|a\s+|an\s+)?(.+)$",
@@ -118,12 +122,9 @@ class AppAccessSkill:
         target = match.group(1).strip()
         if not target or target in {"a", "an", "the"}:
             return None
-        if target in self.app_aliases:
-            return self.app_aliases[target]
-
-        for alias in sorted(self.app_aliases.keys(), key=len, reverse=True):
-            if re.search(rf"\b{re.escape(alias)}\b", target):
-                return self.app_aliases[alias]
+        target_alias = self._resolve_app_alias(target)
+        if target_alias:
+            return target_alias
 
         if len(target.split()) <= 3:
             return target
@@ -141,16 +142,24 @@ class AppAccessSkill:
         )
 
     def open_app(self, app_name: str) -> str:
-        app_lower = (app_name or "").strip().lower()
+        canonical_name = self._resolve_app_alias(app_name) or self._normalize_alias_key(app_name)
+        app_lower = canonical_name.strip().lower()
         if not app_lower:
             return "Tell me the app name. Example: 'open chrome'."
 
-        app_target = self.app_commands.get(app_lower, app_name.strip())
+        if app_lower in self.web_aliases and app_lower not in self.app_commands:
+            label = canonical_name.strip() or app_name.strip()
+            return self._open_url_in_browser(self.web_aliases[app_lower], label.title())
+
+        app_target = self.app_commands.get(app_lower, canonical_name.strip() or app_name.strip())
         try:
             if sys.platform == "darwin":
                 ok, opened_as, err = self._open_app_macos(app_target)
                 if ok:
                     return f"Opening {opened_as}..."
+                if app_lower in self.web_aliases:
+                    label = canonical_name.strip() or app_name.strip()
+                    return self._open_url_in_browser(self.web_aliases[app_lower], label.title())
                 return f"Failed to open {app_target}: {err}"
             if sys.platform.startswith("linux"):
                 subprocess.Popen([app_lower], start_new_session=True)
@@ -323,16 +332,71 @@ class AppAccessSkill:
         if not target or not app_part:
             return None
 
-        app_alias = self.app_aliases.get(app_part)
+        app_alias = self._resolve_app_alias(app_part)
         if app_alias:
             return target, app_alias
 
-        for alias in sorted(self.app_aliases.keys(), key=len, reverse=True):
-            if re.search(rf"\b{re.escape(alias)}\b", app_part):
-                return target, self.app_aliases[alias]
+        embedded_alias = self._resolve_app_alias(app_part, allow_embedded=True)
+        if embedded_alias:
+            return target, embedded_alias
 
         # Fall back to raw app name (user might say full app title).
         return target, app_part
+
+    def _normalize_alias_key(self, text: str) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", (text or "").lower())).strip()
+
+    def _build_alias_index(self) -> Dict[str, str]:
+        alias_index: Dict[str, str] = {}
+        for alias, canonical in self.app_aliases.items():
+            normalized_alias = self._normalize_alias_key(alias)
+            normalized_canonical = self._normalize_alias_key(canonical)
+            if normalized_alias:
+                alias_index[normalized_alias] = normalized_canonical or normalized_alias
+            if normalized_canonical:
+                alias_index.setdefault(normalized_canonical, normalized_canonical)
+
+        for alias in self.app_commands.keys():
+            normalized_alias = self._normalize_alias_key(alias)
+            if normalized_alias:
+                alias_index.setdefault(normalized_alias, normalized_alias)
+
+        for alias in self.web_aliases.keys():
+            normalized_alias = self._normalize_alias_key(alias)
+            if normalized_alias:
+                alias_index.setdefault(normalized_alias, normalized_alias)
+
+        # A few sticky social/web shortcuts deserve hard guarantees.
+        alias_index.setdefault("insta", "instagram")
+        alias_index.setdefault("ig", "instagram")
+        alias_index.setdefault("gram", "instagram")
+        return alias_index
+
+    def _resolve_app_alias(self, text: str, allow_embedded: bool = False) -> Optional[str]:
+        normalized = self._normalize_alias_key(text)
+        if not normalized:
+            return None
+
+        direct = self._alias_index.get(normalized)
+        if direct:
+            return direct
+
+        if allow_embedded:
+            for alias in sorted(self._alias_index.keys(), key=len, reverse=True):
+                if re.search(rf"\b{re.escape(alias)}\b", normalized):
+                    return self._alias_index[alias]
+
+        best_match = None
+        best_score = 0.0
+        for alias, canonical in self._alias_index.items():
+            score = SequenceMatcher(None, normalized, alias).ratio()
+            if score > best_score:
+                best_match = canonical
+                best_score = score
+
+        if best_match and best_score >= 0.86:
+            return best_match
+        return None
 
     def _extract_play_command(self, user_input: str) -> Optional[Tuple[str, str]]:
         raw = (user_input or "").strip()

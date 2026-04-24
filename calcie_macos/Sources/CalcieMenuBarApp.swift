@@ -246,7 +246,7 @@ struct MenuBarContentView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Ask CALCIE")
                     .font(.headline)
-                Text(viewModel.runtimeOnline ? "Follow up, review responses, or hold Right Option to talk." : "Runtime needs attention before chat can respond.")
+                Text(viewModel.runtimeOnline ? "Follow up, review responses, send normal commands, or use the eye button for a one-time vision check." : "Runtime needs attention before chat can respond.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -299,12 +299,21 @@ struct MenuBarContentView: View {
             }
             .help(viewModel.voiceSessionActive ? "Stop talking" : "Talk to CALCIE")
 
-            TextField("Ask follow up...", text: $viewModel.chatInput)
+            TextField("Ask follow up or describe a vision check...", text: $viewModel.chatInput)
                 .onSubmit {
                     viewModel.submitChatMessage()
                 }
                 .textFieldStyle(.roundedBorder)
                 .disabled(viewModel.isSubmittingCommand)
+
+            Button {
+                viewModel.submitChatMessage(asVision: true)
+            } label: {
+                Image(systemName: "eye")
+                    .font(.caption.weight(.bold))
+            }
+            .help("Run this input as a one-time vision check")
+            .disabled(viewModel.isSubmittingCommand || viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
             Button {
                 viewModel.submitChatMessage()
@@ -412,7 +421,7 @@ struct MenuBarContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Type a Command")
                 .font(.subheadline.weight(.semibold))
-            TextField("open chrome", text: $viewModel.typedCommand)
+            TextField("open chrome or vision once check for a red error state", text: $viewModel.typedCommand)
                 .onSubmit {
                     viewModel.submitTypedCommand()
                 }
@@ -421,6 +430,10 @@ struct MenuBarContentView: View {
             HStack {
                 Button(viewModel.isSubmittingCommand ? "Sending..." : "Send") {
                     viewModel.submitTypedCommand()
+                }
+                .disabled(viewModel.isSubmittingCommand || viewModel.typedCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Vision Once") {
+                    viewModel.submitTypedCommand(asVision: true)
                 }
                 .disabled(viewModel.isSubmittingCommand || viewModel.typedCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 if viewModel.isSubmittingCommand {

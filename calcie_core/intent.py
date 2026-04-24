@@ -132,10 +132,16 @@ def is_profile_query(normalized_text: str) -> bool:
     if not normalized_text:
         return False
     patterns = [
+        r"\bsay my name\b",
+        r"\bwhat(?:s| is)? my name\b",
+        r"\bmy name\b",
         r"\btell me about myself\b",
+        r"\btell me about my self\b",
         r"\babout me\b",
         r"\bwho am i\b",
         r"\bwhat do you know about me\b",
+        r"\bwho is this\b",
+        r"\bwho am i to you\b",
     ]
     return any(re.search(p, normalized_text) for p in patterns)
 
