@@ -4,7 +4,7 @@ using CalcieTray.ViewModels;
 
 namespace CalcieTray;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     private TrayController? _trayController;
     private MainWindow? _mainWindow;

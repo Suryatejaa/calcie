@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 
 namespace CalcieTray.Services;
 
@@ -6,6 +7,7 @@ public sealed class RuntimeLauncher : IDisposable
 {
     private readonly string _projectRoot;
     private Process? _runtimeProcess;
+    private bool _ownsRuntimeProcess;
     private DateTimeOffset _lastLaunchAttempt = DateTimeOffset.MinValue;
 
     public RuntimeLauncher()
@@ -52,8 +54,8 @@ public sealed class RuntimeLauncher : IDisposable
                         WorkingDirectory = _projectRoot,
                         UseShellExecute = false,
                         CreateNoWindow = true,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true
+                        RedirectStandardOutput = false,
+                        RedirectStandardError = false
                     },
                     EnableRaisingEvents = true
                 };
@@ -61,6 +63,7 @@ public sealed class RuntimeLauncher : IDisposable
                 process.StartInfo.Environment["CALCIE_PROJECT_ROOT"] = _projectRoot;
                 process.Start();
                 _runtimeProcess = process;
+                _ownsRuntimeProcess = true;
                 return $"Started local CALCIE runtime via `{candidate.Display}`.";
             }
             catch
@@ -113,6 +116,12 @@ public sealed class RuntimeLauncher : IDisposable
         {
             if (!_runtimeProcess.HasExited)
             {
+                if (_ownsRuntimeProcess)
+                {
+                    _runtimeProcess.Kill(entireProcessTree: true);
+                    _runtimeProcess.WaitForExit(3000);
+                }
+
                 _runtimeProcess.Dispose();
             }
         }
@@ -122,6 +131,7 @@ public sealed class RuntimeLauncher : IDisposable
         finally
         {
             _runtimeProcess = null;
+            _ownsRuntimeProcess = false;
         }
     }
 }

@@ -34,7 +34,7 @@ public sealed class LocalApiClient
     public async Task<IReadOnlyList<RuntimeEvent>> EventsAsync(int limit = 12, CancellationToken cancellationToken = default)
     {
         var envelope = await GetAsync<EventsEnvelope>($"events?limit={limit}", cancellationToken);
-        return envelope?.Events ?? Array.Empty<RuntimeEvent>();
+        return envelope?.Events ?? (IReadOnlyList<RuntimeEvent>)Array.Empty<RuntimeEvent>();
     }
 
     public Task<CommandResponse?> CommandAsync(string text, CancellationToken cancellationToken = default) =>
