@@ -12,6 +12,8 @@
     <string>com.suryateja.calcie</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+    <key>CFBundleIconFile</key>
+    <string>calcie-logo.png</string>
     <key>CFBundleName</key>
     <string>CALCIE</string>
     <key>CFBundlePackageType</key>

@@ -13,12 +13,14 @@ EXECUTABLE_DEST="${APP_DIR}/Contents/MacOS/CALCIE"
 RESOURCES_DIR="${APP_DIR}/Contents/Resources"
 INFO_PLIST_SOURCE="${SWIFT_ROOT}/Bundle/Info.plist"
 CONFIG_PATH="${RESOURCES_DIR}/calcie_app_config.json"
+LOGO_SOURCE="${REPO_ROOT}/calcie-logo.png"
 SIGN_IDENTITY="${CALCIE_CODESIGN_IDENTITY:-}"
 SIGN_STYLE="ad-hoc"
 BUILD_TIME_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 SIGN_IDENTITY_JSON="null"
 CLOUD_BASE_URL="${CALCIE_CLOUD_BASE_URL:-${CALCIE_SYNC_BASE_URL:-https://calcie.onrender.com}}"
 RELEASE_CHANNEL="${CALCIE_RELEASE_CHANNEL:-alpha}"
+SHOW_DEVELOPER_TOOLS="${CALCIE_SHOW_DEVELOPER_TOOLS:-}"
 
 if [[ ! -f "${INFO_PLIST_SOURCE}" ]]; then
   echo "Missing Info.plist template at ${INFO_PLIST_SOURCE}" >&2
@@ -42,6 +44,9 @@ mkdir -p "${APP_DIR}/Contents/MacOS" "${RESOURCES_DIR}"
 cp "${INFO_PLIST_SOURCE}" "${APP_DIR}/Contents/Info.plist"
 cp "${EXECUTABLE_SOURCE}" "${EXECUTABLE_DEST}"
 chmod +x "${EXECUTABLE_DEST}"
+if [[ -f "${LOGO_SOURCE}" ]]; then
+  cp "${LOGO_SOURCE}" "${RESOURCES_DIR}/calcie-logo.png"
+fi
 
 if command -v codesign >/dev/null 2>&1; then
   if [[ -z "${SIGN_IDENTITY}" ]]; then
@@ -63,6 +68,14 @@ if [[ -n "${SIGN_IDENTITY}" ]]; then
   SIGN_IDENTITY_JSON="\"${SIGN_IDENTITY//\"/\\\"}\""
 fi
 
+if [[ -z "${SHOW_DEVELOPER_TOOLS}" ]]; then
+  if [[ "${CONFIGURATION:l}" == "release" ]]; then
+    SHOW_DEVELOPER_TOOLS="false"
+  else
+    SHOW_DEVELOPER_TOOLS="true"
+  fi
+fi
+
 cat > "${CONFIG_PATH}" <<JSON
 {
   "project_root":"${REPO_ROOT}",
@@ -71,6 +84,7 @@ cat > "${CONFIG_PATH}" <<JSON
   "code_signing_identity":${SIGN_IDENTITY_JSON},
   "built_at":"${BUILD_TIME_UTC}",
   "repo_backed":true,
+  "show_developer_tools":${SHOW_DEVELOPER_TOOLS},
   "cloud_base_url":"${CLOUD_BASE_URL}",
   "release_channel":"${RELEASE_CHANNEL}"
 }

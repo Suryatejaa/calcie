@@ -9,4 +9,10 @@
     <RootNamespace>CalcieTray</RootNamespace>
     <AssemblyName>CalcieTray</AssemblyName>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="..\..\calcie-logo.png">
+      <Link>Assets\calcie-logo.png</Link>
+    </Resource>
+  </ItemGroup>
 </Project>

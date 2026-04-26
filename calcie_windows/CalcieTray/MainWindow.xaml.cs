@@ -76,12 +76,12 @@ public partial class MainWindow : Window
         var workArea = SystemParameters.WorkArea;
         if (trayPoint is { } point)
         {
-            Left = Math.Max(workArea.Left + 8, Math.Min(workArea.Right - Width - 6, point.X - Width + 26));
-            Top = Math.Max(workArea.Top + 8, Math.Min(workArea.Bottom - Height - 4, point.Y - Height - 10));
+            Left = Math.Max(workArea.Left + 8, Math.Min(workArea.Right - Width - 4, point.X - Width + 18));
+            Top = Math.Max(workArea.Top + 8, Math.Min(workArea.Bottom - Height - 2, point.Y - Height - 6));
             return;
         }
 
-        Left = Math.Max(workArea.Left + 8, workArea.Right - Width - 6);
-        Top = Math.Max(workArea.Top + 8, workArea.Bottom - Height - 4);
+        Left = Math.Max(workArea.Left + 8, workArea.Right - Width - 4);
+        Top = Math.Max(workArea.Top + 8, workArea.Bottom - Height - 2);
     }
 }

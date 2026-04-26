@@ -57,6 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        if let appIcon = StatusBarController.calcieLogoImage(pointSize: 256, template: false) {
+            NSApp.applicationIconImage = appIcon
+        }
         statusBarController = StatusBarController(viewModel: viewModel, mediaSessionManager: mediaSessionManager)
         viewModel.dismissPanelHandler = { [weak self] in
             self?.statusBarController?.closePopover()
@@ -154,7 +157,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             panel.isFloatingPanel = true
             panel.level = .floating
             panel.hidesOnDeactivate = false
-            panel.title = "CALCIE Advanced Options"
+            panel.title = "CALCIE Settings"
             panel.titlebarAppearsTransparent = true
             panel.isReleasedWhenClosed = false
             panel.center()
@@ -181,23 +184,22 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     }
 
     private func statusItemImage(for state: String) -> NSImage? {
-        let systemName: String
-        switch state {
-        case "listening":
-            systemName = "mic.fill"
-        case "thinking":
-            systemName = "brain.head.profile"
-        case "speaking":
-            systemName = "waveform"
-        case "vision_monitoring":
-            systemName = "eye.fill"
-        case "error", "needs_permission":
-            systemName = "exclamationmark.triangle.fill"
-        default:
-            systemName = "sparkles"
+        if let logo = Self.calcieLogoImage(pointSize: 18, template: true) {
+            return logo
         }
-        let image = NSImage(systemSymbolName: systemName, accessibilityDescription: "CALCIE")
+
+        let image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "CALCIE")
         image?.isTemplate = true
+        return image
+    }
+
+    static func calcieLogoImage(pointSize: CGFloat, template: Bool) -> NSImage? {
+        guard let url = Bundle.main.url(forResource: "calcie-logo", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else {
+            return nil
+        }
+        image.size = NSSize(width: pointSize, height: pointSize)
+        image.isTemplate = template
         return image
     }
 }
@@ -332,7 +334,7 @@ struct MenuBarContentView: View {
                 Button(viewModel.voiceSessionActive ? "Stop Talking" : "Talk") {
                     viewModel.toggleVoice()
                 }
-                Button("Advanced") {
+                Button("Settings") {
                     viewModel.openAdvancedOptions()
                 }
                 Button("Player") {
@@ -402,7 +404,7 @@ struct MenuBarContentView: View {
                 }
             }
             HStack {
-                Button("Advanced Options") {
+                Button("Settings") {
                     viewModel.openAdvancedOptions()
                 }
                 Button("Open Player") {
@@ -489,7 +491,7 @@ struct MenuBarContentView: View {
                     viewModel.stopVision()
                 }
             }
-            Button("Edit in Advanced Options") {
+            Button("Edit in Settings") {
                 viewModel.openAdvancedOptions()
             }
             .font(.caption)
@@ -565,6 +567,10 @@ struct AdvancedOptionsView: View {
                 permissions
                 Divider()
                 startup
+                if viewModel.developerToolsAvailable {
+                    Divider()
+                    developerToolsSection
+                }
             }
             .padding(16)
         }
@@ -573,7 +579,7 @@ struct AdvancedOptionsView: View {
 
     private var runtimeSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("CALCIE Advanced")
+            Text("CALCIE Settings")
                 .font(.headline)
             Text("State: \(viewModel.runtimeState)")
                 .font(.subheadline)
@@ -590,7 +596,7 @@ struct AdvancedOptionsView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            if !viewModel.runtimeIdentityMessage.isEmpty {
+            if viewModel.developerToolsAvailable && !viewModel.runtimeIdentityMessage.isEmpty {
                 Text(viewModel.runtimeIdentityMessage)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -603,13 +609,7 @@ struct AdvancedOptionsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Assistant")
                 .font(.subheadline.weight(.semibold))
-            Text("Model: \(viewModel.activeLLM)")
-                .font(.caption)
-            Text("TTS: \(viewModel.ttsProvider)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
             if !viewModel.lastResponse.isEmpty {
-                Divider()
                 Text("Last Response")
                     .font(.caption.weight(.semibold))
                 Text(viewModel.lastResponse)
@@ -617,9 +617,14 @@ struct AdvancedOptionsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Last route: \(viewModel.lastRoute)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            if viewModel.developerToolsAvailable {
+                Text("Model: \(viewModel.activeLLM)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("TTS: \(viewModel.ttsProvider) · route: \(viewModel.lastRoute)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -732,14 +737,6 @@ struct AdvancedOptionsView: View {
             Text("Google session: \(mediaSessionManager.googleSessionState)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Text(mediaSessionManager.googleSessionDetail)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(mediaSessionManager.googleSessionFallbackHint)
-                .font(.caption2)
-                .foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
             if !mediaSessionManager.currentURLString.isEmpty {
                 Text(mediaSessionManager.currentURLString)
                     .font(.caption2)
@@ -753,29 +750,41 @@ struct AdvancedOptionsView: View {
                 Button("Reload Player") {
                     mediaSessionManager.reloadCurrentMedia()
                 }
-                Button("Bootstrap Video") {
-                    mediaSessionManager.loadBootstrapMedia()
-                }
             }
             HStack {
-                Button("Premium Login") {
-                    mediaSessionManager.openEmbeddedGoogleSignIn(
+                Button("Google Sign-In") {
+                    mediaSessionManager.openGoogleSignIn(
                         for: mediaSessionManager.currentPlatform == "ytmusic" ? "ytmusic" : "youtube"
                     )
                 }
-                Button("YouTube Login") {
-                    mediaSessionManager.openGoogleSignIn(for: "youtube")
-                }
-                Button("Music Login") {
-                    mediaSessionManager.openGoogleSignIn(for: "ytmusic")
-                }
-            }
-            HStack {
                 Button("Sign Out") {
                     mediaSessionManager.signOutGoogleSession()
                 }
-                Button("Open Google Login") {
-                    mediaSessionManager.openGoogleSignInInBrowser(for: "youtube")
+            }
+            if viewModel.developerToolsAvailable {
+                Text(mediaSessionManager.googleSessionDetail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(mediaSessionManager.googleSessionFallbackHint)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Bootstrap Video") {
+                        mediaSessionManager.loadBootstrapMedia()
+                    }
+                    Button("YouTube Login") {
+                        mediaSessionManager.openGoogleSignIn(for: "youtube")
+                    }
+                    Button("Music Login") {
+                        mediaSessionManager.openGoogleSignIn(for: "ytmusic")
+                    }
+                }
+                HStack {
+                    Button("Browser Login") {
+                        mediaSessionManager.openGoogleSignInInBrowser(for: "youtube")
+                    }
                 }
             }
         }
@@ -801,17 +810,12 @@ struct AdvancedOptionsView: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack {
-                Button("Open Project Root") {
-                    viewModel.openProjectRoot()
-                }
-            }
         }
     }
 
     private var runtimeActions: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Advanced Actions")
+            Text("Developer Actions")
                 .font(.subheadline.weight(.semibold))
             HStack {
                 Button("Open Debug Terminal") {
@@ -826,10 +830,24 @@ struct AdvancedOptionsView: View {
                 Button("Open Project Root") {
                     viewModel.openProjectRoot()
                 }
-                Button("Quit CALCIE") {
-                    NSApplication.shared.terminate(nil)
-                }
             }
+        }
+    }
+
+    private var developerToolsSection: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Only shown in repo-backed builds so normal users don't have to see internal controls.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                appBundleSection
+                runtimeActions
+            }
+            .padding(.top, 8)
+        } label: {
+            Text("Developer Tools")
+                .font(.subheadline.weight(.semibold))
         }
     }
 
