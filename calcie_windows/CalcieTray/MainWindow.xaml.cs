@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Input;
 using CalcieTray.ViewModels;
 
 namespace CalcieTray;
@@ -14,6 +15,26 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = viewModel;
+    }
+
+    private void PendingCommandTextBox_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+
+        if (DataContext is not ShellViewModel viewModel)
+        {
+            return;
+        }
+
+        if (viewModel.SubmitCommand.CanExecute(null))
+        {
+            viewModel.SubmitCommand.Execute(null);
+        }
     }
 
     public void ShowAsTrayPopup()
