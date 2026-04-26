@@ -34,21 +34,23 @@ public sealed class TrayController : IDisposable
             ContextMenuStrip = menu
         };
 
-        _notifyIcon.DoubleClick += (_, _) => ShowWindow();
+        _notifyIcon.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ToggleWindow();
+            }
+        };
+    }
+
+    private void ToggleWindow()
+    {
+        _window.ToggleTrayPopup();
     }
 
     private void ShowWindow()
     {
-        _window.Show();
-        if (_window.WindowState == WindowState.Minimized)
-        {
-            _window.WindowState = WindowState.Normal;
-        }
-
-        _window.Activate();
-        _window.Topmost = true;
-        _window.Topmost = false;
-        _window.Focus();
+        _window.ShowAsTrayPopup();
     }
 
     private void Quit()
