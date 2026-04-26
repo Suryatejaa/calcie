@@ -17,6 +17,12 @@ public sealed class RuntimeEvent
             : $"{Timestamp} · {Type} · {Route}";
 }
 
+public sealed class ChatMessage
+{
+    public string Speaker { get; set; } = "CALCIE says";
+    public string Body { get; set; } = "";
+}
+
 public sealed class RuntimeStatus
 {
     [JsonPropertyName("state")]
