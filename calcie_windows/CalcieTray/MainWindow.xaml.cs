@@ -6,6 +6,8 @@ namespace CalcieTray;
 
 public partial class MainWindow : Window
 {
+    private DateTime _lastTrayShowUtc = DateTime.MinValue;
+
     public bool AllowExit { get; set; }
 
     public MainWindow(ShellViewModel viewModel)
@@ -17,6 +19,7 @@ public partial class MainWindow : Window
     public void ShowAsTrayPopup()
     {
         PositionNearSystemTray();
+        _lastTrayShowUtc = DateTime.UtcNow;
         Show();
         Activate();
         Focus();
@@ -36,6 +39,15 @@ public partial class MainWindow : Window
     protected override void OnDeactivated(EventArgs e)
     {
         base.OnDeactivated(e);
+
+        // When the popup is opened from the tray, Windows can briefly report a
+        // deactivation caused by the tray click itself. Without a short grace
+        // period, the panel appears to do nothing on single-click because it
+        // opens and hides immediately.
+        if ((DateTime.UtcNow - _lastTrayShowUtc).TotalMilliseconds < 350)
+        {
+            return;
+        }
 
         if (!AllowExit && IsVisible)
         {
