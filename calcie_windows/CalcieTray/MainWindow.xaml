@@ -68,7 +68,7 @@
                             <TextBlock Text="{Binding RuntimeState}"
                                        FontSize="13.5"
                                        FontWeight="Bold"
-                                       Foreground="{StaticResource TextBrush}" />
+                                       Foreground="{StaticResource TextPrimaryBrush}" />
                         </Border>
                     </StackPanel>
                 </Grid>
@@ -128,7 +128,7 @@
                              Background="#9C23252B"
                              BorderBrush="#5A5F636B"
                              BorderThickness="1.2"
-                             Foreground="{StaticResource TextBrush}"
+                             Foreground="{StaticResource TextPrimaryBrush}"
                              FontSize="14.5"
                              FontWeight="SemiBold"
                              Text="{Binding PendingCommand, UpdateSourceTrigger=PropertyChanged}"
@@ -159,7 +159,7 @@
 
                 <Expander Grid.Row="3"
                           ExpandDirection="Down"
-                          Foreground="{StaticResource TextBrush}">
+                          Foreground="{StaticResource TextPrimaryBrush}">
                     <Expander.Header>
                         <TextBlock Text="Tools &amp; Status"
                                    Foreground="{StaticResource TextMutedBrush}"
