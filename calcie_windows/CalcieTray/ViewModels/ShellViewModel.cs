@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Forms;
+using System.Windows.Threading;
 using CalcieTray.Models;
 using CalcieTray.Services;
 
@@ -34,6 +35,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
     private bool _updateRequired;
     private string _lastNotifiedResponse = "";
     private string _lastNotifiedUpdateKey = "";
+    private string _visionGoal = "watch for terminal build failures";
+    private string _profileImportPrompt = "Return everything you know about me inside one fenced code block. Include long-term memory, bio details, and any model-set context you have with dates when available. I want a thorough memory export of what you've learned about me. Skip tool details and include only information that is actually about me. Be exhaustive and careful.";
+    private string _profileImportText = "";
+    private string _profileImportMessage = "No ChatGPT memory import yet.";
+    private bool _profileImportInFlight;
+    private bool _hasChatGptProfileImport;
+    private int _profileImportChars;
 
     public ShellViewModel()
     {
@@ -47,11 +55,17 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
         DownloadUpdateCommand = new RelayCommand(_ => OpenUrl(UpdateDownloadUrl), _ => !string.IsNullOrWhiteSpace(UpdateDownloadUrl));
         OpenReleaseNotesCommand = new RelayCommand(_ => OpenUrl(UpdateReleaseNotesUrl), _ => !string.IsNullOrWhiteSpace(UpdateReleaseNotesUrl));
         OpenPlayerCommand = new RelayCommand(_ => ShowPlayerAction?.Invoke());
+        OpenSettingsCommand = new RelayCommand(_ => ShowSettingsAction?.Invoke());
         StartVoiceCommand = new RelayCommand(async _ => await StartVoiceAsync());
         StopVoiceCommand = new RelayCommand(async _ => await StopVoiceAsync());
+        StartVisionCommand = new RelayCommand(async _ => await StartVisionAsync(), _ => !string.IsNullOrWhiteSpace(VisionGoal));
+        StopVisionCommand = new RelayCommand(async _ => await StopVisionAsync());
+        CopyProfileImportPromptCommand = new RelayCommand(_ => CopyProfileImportPrompt());
+        ImportProfileCommand = new RelayCommand(async _ => await ImportChatGptProfileAsync(), _ => !ProfileImportInFlight && !string.IsNullOrWhiteSpace(ProfileImportText));
     }
 
     public ObservableCollection<RuntimeEvent> Events { get; } = new();
+    public ObservableCollection<string> PermissionWarnings { get; } = new();
 
     public ICommand RefreshCommand { get; }
     public ICommand RestartRuntimeCommand { get; }
@@ -59,13 +73,19 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
     public ICommand DownloadUpdateCommand { get; }
     public ICommand OpenReleaseNotesCommand { get; }
     public ICommand OpenPlayerCommand { get; }
+    public ICommand OpenSettingsCommand { get; }
     public ICommand StartVoiceCommand { get; }
     public ICommand StopVoiceCommand { get; }
+    public ICommand StartVisionCommand { get; }
+    public ICommand StopVisionCommand { get; }
+    public ICommand CopyProfileImportPromptCommand { get; }
+    public ICommand ImportProfileCommand { get; }
     public ICommand SubmitCommand => _submitCommand;
     public ICommand SubmitVisionCommand => _submitVisionCommand;
 
     public Action? ShowPlayerAction { get; set; }
     public Action<string, string, ToolTipIcon>? ShowNotificationAction { get; set; }
+    public Action? ShowSettingsAction { get; set; }
 
     public string RuntimeState
     {
@@ -104,6 +124,21 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
     {
         get => _lastResponse;
         private set => SetField(ref _lastResponse, value);
+    }
+
+    public string VisionGoal
+    {
+        get => _visionGoal;
+        set
+        {
+            if (SetField(ref _visionGoal, value))
+            {
+                if (StartVisionCommand is RelayCommand relay)
+                {
+                    relay.RaiseCanExecuteChanged();
+                }
+            }
+        }
     }
 
     public bool VoiceSessionActive
@@ -172,9 +207,64 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _updateRequired, value);
     }
 
+    public string ProfileImportPrompt
+    {
+        get => _profileImportPrompt;
+        private set => SetField(ref _profileImportPrompt, value);
+    }
+
+    public string ProfileImportText
+    {
+        get => _profileImportText;
+        set
+        {
+            if (SetField(ref _profileImportText, value))
+            {
+                if (ImportProfileCommand is RelayCommand relay)
+                {
+                    relay.RaiseCanExecuteChanged();
+                }
+            }
+        }
+    }
+
+    public string ProfileImportMessage
+    {
+        get => _profileImportMessage;
+        private set => SetField(ref _profileImportMessage, value);
+    }
+
+    public bool ProfileImportInFlight
+    {
+        get => _profileImportInFlight;
+        private set
+        {
+            if (SetField(ref _profileImportInFlight, value))
+            {
+                if (ImportProfileCommand is RelayCommand relay)
+                {
+                    relay.RaiseCanExecuteChanged();
+                }
+            }
+        }
+    }
+
+    public bool HasChatGptProfileImport
+    {
+        get => _hasChatGptProfileImport;
+        private set => SetField(ref _hasChatGptProfileImport, value);
+    }
+
+    public int ProfileImportChars
+    {
+        get => _profileImportChars;
+        private set => SetField(ref _profileImportChars, value);
+    }
+
     public async Task InitializeAsync()
     {
         await RefreshAsync();
+        await RefreshProfileImportStatusAsync();
         await RefreshUpdateStatusAsync();
         _ = Task.Run(PollLoopAsync);
     }
@@ -195,6 +285,15 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
                 ? $"LLM: {status.ActiveLlm} · TTS: {status.TtsProviderMode}"
                 : status.Detail;
             VoiceSessionActive = status.VoiceSessionActive ?? false;
+            if (!string.IsNullOrWhiteSpace(status.CurrentMonitorGoal))
+            {
+                VisionGoal = status.CurrentMonitorGoal;
+            }
+            ApplyPermissionWarnings(status.PermissionWarnings);
+            if (status.ProfileImport is not null)
+            {
+                ApplyProfileImportStatus(status.ProfileImport);
+            }
 
             if (!string.IsNullOrWhiteSpace(status.LastResponse))
             {
@@ -262,6 +361,90 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
         await RefreshAsync();
+    }
+
+    public async Task StartVisionAsync()
+    {
+        var goal = VisionGoal.Trim();
+        if (string.IsNullOrWhiteSpace(goal))
+        {
+            return;
+        }
+
+        await ExecuteResponseAsync(() => _client.StartVisionAsync(goal, _shutdown.Token), $"Vision monitor started: {goal}");
+    }
+
+    public async Task StopVisionAsync()
+    {
+        await ExecuteResponseAsync(() => _client.StopVisionAsync(_shutdown.Token), "Vision monitor stopped.");
+    }
+
+    public async Task RefreshProfileImportStatusAsync()
+    {
+        try
+        {
+            var status = await _client.ProfileImportStatusAsync(_shutdown.Token);
+            if (status is not null)
+            {
+                ApplyProfileImportStatus(status);
+            }
+        }
+        catch (Exception ex)
+        {
+            ProfileImportMessage = $"Profile import status unavailable: {ex.Message}";
+        }
+    }
+
+    public void CopyProfileImportPrompt()
+    {
+        try
+        {
+            Clipboard.SetText(ProfileImportPrompt);
+            ProfileImportMessage = "Prompt copied. Paste it into ChatGPT, then paste the fenced response here.";
+        }
+        catch (Exception ex)
+        {
+            ProfileImportMessage = $"Could not copy prompt: {ex.Message}";
+        }
+    }
+
+    public async Task ImportChatGptProfileAsync()
+    {
+        var text = ProfileImportText.Trim();
+        if (string.IsNullOrWhiteSpace(text) || ProfileImportInFlight)
+        {
+            return;
+        }
+
+        ProfileImportInFlight = true;
+        ProfileImportMessage = "Importing ChatGPT memory export...";
+        try
+        {
+            var response = await _client.ImportChatGptProfileAsync(text, _shutdown.Token);
+            if (response is not null)
+            {
+                ProfileImportMessage = response.Response;
+                if (response.ImportedChars.HasValue)
+                {
+                    ProfileImportChars = response.ImportedChars.Value;
+                }
+                HasChatGptProfileImport = response.Ok;
+                if (response.Ok)
+                {
+                    ProfileImportText = "";
+                }
+            }
+
+            await RefreshProfileImportStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            ProfileImportMessage = $"Import failed: {ex.Message}";
+        }
+        finally
+        {
+            ProfileImportInFlight = false;
+        }
     }
 
     public async Task RefreshUpdateStatusAsync()
@@ -352,6 +535,18 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
         });
     }
 
+    private void ApplyPermissionWarnings(IReadOnlyCollection<string> warnings)
+    {
+        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+        {
+            PermissionWarnings.Clear();
+            foreach (var warning in warnings)
+            {
+                PermissionWarnings.Add(warning);
+            }
+        });
+    }
+
     private async Task PollLoopAsync()
     {
         var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
@@ -422,6 +617,26 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
         else
         {
             UpdateStatusMessage = $"No newer update on {release.Channel}. Current: {currentVersion} build {currentBuild}.";
+        }
+    }
+
+    private void ApplyProfileImportStatus(ProfileImportStatus status)
+    {
+        ProfileImportPrompt = status.ImportPrompt;
+        HasChatGptProfileImport = status.HasChatGptImport;
+        ProfileImportChars = status.ImportedChars;
+        if (status.HasChatGptImport)
+        {
+            var when = string.IsNullOrWhiteSpace(status.ImportedAt) ? "previously" : status.ImportedAt;
+            ProfileImportMessage = $"ChatGPT memory import loaded ({status.ImportedChars} chars, {when}).";
+        }
+        else if (status.HasProfile)
+        {
+            ProfileImportMessage = "Profile template is present, but no ChatGPT memory import yet.";
+        }
+        else
+        {
+            ProfileImportMessage = "No ChatGPT memory import yet.";
         }
     }
 

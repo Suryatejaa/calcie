@@ -10,6 +10,7 @@ public partial class App : System.Windows.Application
     private TrayController? _trayController;
     private MainWindow? _mainWindow;
     private PlayerWindowController? _playerWindowController;
+    private SettingsWindowController? _settingsWindowController;
     private ShellViewModel? _viewModel;
     private HotkeyService? _hotkeyService;
 
@@ -24,8 +25,10 @@ public partial class App : System.Windows.Application
             _mainWindow.Icon = logo;
         }
         _playerWindowController = new PlayerWindowController();
+        _settingsWindowController = new SettingsWindowController(_viewModel);
         _viewModel.ShowPlayerAction = () => _playerWindowController.ShowPlayer();
-        _trayController = new TrayController(_mainWindow, _viewModel, _playerWindowController);
+        _viewModel.ShowSettingsAction = () => _settingsWindowController.ShowSettings();
+        _trayController = new TrayController(_mainWindow, _viewModel, _playerWindowController, _settingsWindowController);
         _viewModel.ShowNotificationAction = (title, message, icon) => _trayController?.ShowNotification(title, message, icon);
         _hotkeyService = new HotkeyService();
         if (_hotkeyService.Register())
@@ -64,6 +67,7 @@ public partial class App : System.Windows.Application
         _hotkeyService?.Dispose();
         _trayController?.Dispose();
         _playerWindowController?.Dispose();
+        _settingsWindowController?.Dispose();
         _viewModel?.Dispose();
         base.OnExit(e);
     }
