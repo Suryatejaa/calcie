@@ -9,6 +9,10 @@
         Height="760"
         MinWidth="420"
         MinHeight="620"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
         WindowStartupLocation="CenterScreen">
     <Grid>
         <Grid.Background>
