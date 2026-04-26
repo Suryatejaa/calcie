@@ -78,7 +78,7 @@ public partial class App : System.Windows.Application
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         e.Handled = true;
-        MessageBox.Show(
+        System.Windows.MessageBox.Show(
             $"CALCIE hit an unexpected Windows UI error.\n\n{e.Exception.Message}",
             "CALCIE",
             MessageBoxButton.OK,

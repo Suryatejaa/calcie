@@ -51,7 +51,7 @@ public sealed class SettingsWindowController : IDisposable
             }
             catch (Exception ex)
             {
-                MessageBox.Show(
+                System.Windows.MessageBox.Show(
                     $"CALCIE could not open Settings.\n\n{ex.Message}",
                     "CALCIE",
                     MessageBoxButton.OK,
