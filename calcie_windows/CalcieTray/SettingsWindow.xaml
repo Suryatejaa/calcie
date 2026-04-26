@@ -9,6 +9,8 @@
         Height="700"
         MinWidth="450"
         MinHeight="700"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterScreen"
         Background="{StaticResource WindowBackgroundBrush}">
     <Grid Background="{StaticResource WindowBackgroundBrush}">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -37,7 +39,7 @@
                         <TextBlock Text="Ask ChatGPT for a memory export, then paste the fenced response here. CALCIE stores it locally on this machine."
                                    Margin="0,5,0,8"
                                    Style="{StaticResource BodyTextStyle}" />
-                        <TextBox Text="{Binding ProfileImportPrompt}"
+                        <TextBox Text="{Binding ProfileImportPrompt, Mode=OneWay}"
                                  IsReadOnly="True"
                                  TextWrapping="Wrap"
                                  Style="{StaticResource InputTextBoxStyle}"
