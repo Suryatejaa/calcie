@@ -91,7 +91,7 @@ public sealed class TrayController : IDisposable
     {
         using Stream? stream = typeof(TrayController).Assembly.GetManifestResourceStream("CalcieTray.Assets.calcie-logo.png");
         using var bitmap = stream is not null ? new Bitmap(stream) : new Bitmap(64, 64);
-        using var iconBitmap = new Bitmap(bitmap, new Size(64, 64));
+        using var iconBitmap = new Bitmap(bitmap, new System.Drawing.Size(64, 64));
         var iconHandle = iconBitmap.GetHicon();
         try
         {
