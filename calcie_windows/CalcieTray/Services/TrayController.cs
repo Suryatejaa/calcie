@@ -1,13 +1,10 @@
 using System.Drawing;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Forms;
 using CalcieTray.ViewModels;
 using Application = System.Windows.Application;
-using DrawingColor = System.Drawing.Color;
-using DrawingFontStyle = System.Drawing.FontStyle;
-using DrawingPointF = System.Drawing.PointF;
-using DrawingRectangle = System.Drawing.Rectangle;
 
 namespace CalcieTray.Services;
 
@@ -92,26 +89,10 @@ public sealed class TrayController : IDisposable
 
     private static Icon BuildTrayIcon()
     {
-        using var bitmap = new Bitmap(64, 64);
-        using var graphics = Graphics.FromImage(bitmap);
-        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        graphics.Clear(DrawingColor.Transparent);
-
-        using var tileBrush = new SolidBrush(DrawingColor.FromArgb(246, 16, 18, 22));
-        using var ringPen = new Pen(DrawingColor.FromArgb(130, 119, 127, 140), 2f);
-        var tileRect = new DrawingRectangle(7, 7, 50, 50);
-        graphics.FillEllipse(tileBrush, tileRect);
-        graphics.DrawEllipse(ringPen, tileRect);
-
-        using var textBrush = new SolidBrush(DrawingColor.FromArgb(247, 248, 250));
-        using var font = new Font("Segoe UI", 26, DrawingFontStyle.Bold, GraphicsUnit.Pixel);
-        var size = graphics.MeasureString("C", font);
-        var origin = new DrawingPointF(
-            tileRect.Left + ((tileRect.Width - size.Width) / 2f),
-            tileRect.Top + ((tileRect.Height - size.Height) / 2f) - 1f);
-        graphics.DrawString("C", font, textBrush, origin);
-
-        var iconHandle = bitmap.GetHicon();
+        using Stream? stream = typeof(TrayController).Assembly.GetManifestResourceStream("CalcieTray.Assets.calcie-logo.png");
+        using var bitmap = stream is not null ? new Bitmap(stream) : new Bitmap(64, 64);
+        using var iconBitmap = new Bitmap(bitmap, new Size(64, 64));
+        var iconHandle = iconBitmap.GetHicon();
         try
         {
             return (Icon)Icon.FromHandle(iconHandle).Clone();

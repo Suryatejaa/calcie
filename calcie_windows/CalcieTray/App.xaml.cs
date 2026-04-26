@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Media.Imaging;
 using CalcieTray.Services;
 using CalcieTray.ViewModels;
 
@@ -18,6 +19,10 @@ public partial class App : System.Windows.Application
 
         _viewModel = new ShellViewModel();
         _mainWindow = new MainWindow(_viewModel);
+        if (TryLoadLogo() is { } logo)
+        {
+            _mainWindow.Icon = logo;
+        }
         _playerWindowController = new PlayerWindowController();
         _viewModel.ShowPlayerAction = () => _playerWindowController.ShowPlayer();
         _trayController = new TrayController(_mainWindow, _viewModel, _playerWindowController);
@@ -61,5 +66,17 @@ public partial class App : System.Windows.Application
         _playerWindowController?.Dispose();
         _viewModel?.Dispose();
         base.OnExit(e);
+    }
+
+    private static BitmapFrame? TryLoadLogo()
+    {
+        try
+        {
+            return BitmapFrame.Create(new Uri("pack://application:,,,/Assets/calcie-logo.png", UriKind.Absolute));
+        }
+        catch
+        {
+            return null;
+        }
     }
 }
