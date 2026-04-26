@@ -42,6 +42,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
     private bool _profileImportInFlight;
     private bool _hasChatGptProfileImport;
     private int _profileImportChars;
+    private const int MaxChatHistoryItems = 8;
 
     public ShellViewModel()
     {
@@ -65,6 +66,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public ObservableCollection<RuntimeEvent> Events { get; } = new();
+    public ObservableCollection<ChatMessage> ResponseHistory { get; } = new();
     public ObservableCollection<string> PermissionWarnings { get; } = new();
 
     public ICommand RefreshCommand { get; }
@@ -123,7 +125,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
     public string LastResponse
     {
         get => _lastResponse;
-        private set => SetField(ref _lastResponse, value);
+        private set
+        {
+            if (SetField(ref _lastResponse, value))
+            {
+                AppendResponseHistory(value);
+            }
+        }
     }
 
     public string VisionGoal
@@ -692,6 +700,31 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
 
         _lastNotifiedResponse = trimmed;
         ShowNotificationAction?.Invoke("CALCIE", trimmed, ToolTipIcon.Info);
+    }
+
+    private void AppendResponseHistory(string text)
+    {
+        var trimmed = text.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed) || trimmed == "Waiting for CALCIE...")
+        {
+            return;
+        }
+
+        if (ResponseHistory.Count > 0 && ResponseHistory[0].Body == trimmed)
+        {
+            return;
+        }
+
+        ResponseHistory.Insert(0, new ChatMessage
+        {
+            Speaker = "CALCIE says",
+            Body = trimmed
+        });
+
+        while (ResponseHistory.Count > MaxChatHistoryItems)
+        {
+            ResponseHistory.RemoveAt(ResponseHistory.Count - 1);
+        }
     }
 
     private void NotifyUpdateIfNeeded(UpdateRelease release)
