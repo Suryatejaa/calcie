@@ -16,7 +16,7 @@ public sealed class SettingsWindowController : IDisposable
 
     public void ShowSettings()
     {
-        Application.Current.Dispatcher.Invoke(() =>
+        System.Windows.Application.Current.Dispatcher.Invoke(() =>
         {
             EnsureWindow();
             if (_settingsWindow is null)
