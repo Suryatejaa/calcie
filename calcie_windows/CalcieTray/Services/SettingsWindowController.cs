@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Windows;
 using CalcieTray.ViewModels;
 
 namespace CalcieTray.Services;
@@ -14,9 +16,27 @@ public sealed class SettingsWindowController : IDisposable
 
     public void ShowSettings()
     {
-        EnsureWindow();
-        _settingsWindow!.Show();
-        _settingsWindow.Activate();
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            EnsureWindow();
+            if (_settingsWindow is null)
+            {
+                return;
+            }
+
+            if (!_settingsWindow.IsVisible)
+            {
+                _settingsWindow.Show();
+            }
+
+            if (_settingsWindow.WindowState == WindowState.Minimized)
+            {
+                _settingsWindow.WindowState = WindowState.Normal;
+            }
+
+            _settingsWindow.Activate();
+            _settingsWindow.Focus();
+        });
     }
 
     private void EnsureWindow()
@@ -27,7 +47,7 @@ public sealed class SettingsWindowController : IDisposable
         }
 
         _settingsWindow = new SettingsWindow(_viewModel);
-        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow.Closing += OnWindowClosing;
     }
 
     public void Dispose()
@@ -39,5 +59,16 @@ public sealed class SettingsWindowController : IDisposable
 
         _settingsWindow.Close();
         _settingsWindow = null;
+    }
+
+    private void OnWindowClosing(object? sender, CancelEventArgs e)
+    {
+        if (_settingsWindow is null)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        _settingsWindow.Hide();
     }
 }
