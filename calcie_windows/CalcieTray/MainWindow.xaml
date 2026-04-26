@@ -5,173 +5,205 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="CALCIE"
-        Width="420"
-        Height="620"
-        MinWidth="380"
-        MinHeight="520"
-        Background="#151312"
-        Foreground="#F2ECE6"
+        Width="470"
+        Height="760"
+        MinWidth="420"
+        MinHeight="620"
         WindowStartupLocation="CenterScreen">
-    <Grid Margin="18">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-
-        <StackPanel Grid.Row="0" Margin="0,0,0,12">
-            <TextBlock Text="CALCIE"
-                       FontSize="28"
-                       FontWeight="Bold" />
-            <TextBlock Text="{Binding RuntimeStateLabel}"
-                       Margin="0,4,0,0"
-                       FontSize="14"
-                       Foreground="#D1C7BD" />
-            <TextBlock Text="{Binding RuntimeDetail}"
-                       Margin="0,8,0,0"
-                       TextWrapping="Wrap"
-                       Foreground="#B7AAA0" />
-        </StackPanel>
-
-        <StackPanel Grid.Row="1"
-                    Orientation="Horizontal"
-                    Margin="0,0,0,12">
-            <Button Content="Refresh"
-                    Padding="12,8"
-                    Margin="0,0,8,0"
-                    Command="{Binding RefreshCommand}" />
-            <Button Content="Restart Runtime"
-                    Padding="12,8"
-                    Margin="0,0,8,0"
-                    Command="{Binding RestartRuntimeCommand}" />
-            <Button Content="Talk"
-                    Padding="12,8"
-                    Margin="0,0,8,0"
-                    Command="{Binding StartVoiceCommand}" />
-            <Button Content="Stop"
-                    Padding="12,8"
-                    Margin="0,0,8,0"
-                    Command="{Binding StopVoiceCommand}" />
-            <Button Content="Open Player"
-                    Padding="12,8"
-                    Command="{Binding OpenPlayerCommand}" />
-        </StackPanel>
-
-        <Border Grid.Row="2"
-                Padding="14"
-                Margin="0,0,0,12"
-                CornerRadius="14"
-                Background="#221D1A"
-                BorderBrush="#3D332E"
-                BorderThickness="1">
-            <StackPanel>
-                <TextBlock Text="Ask CALCIE"
-                           FontSize="15"
-                           FontWeight="SemiBold"
-                           Margin="0,0,0,10" />
-                <TextBox Text="{Binding PendingCommand, UpdateSourceTrigger=PropertyChanged}"
-                         Padding="12"
-                         AcceptsReturn="True"
-                         TextWrapping="Wrap"
-                         MinHeight="72"
-                         Background="#312925"
-                         BorderBrush="#4C4039"
-                         Foreground="#F2ECE6" />
-                <StackPanel Orientation="Horizontal"
-                            Margin="0,10,0,0">
-                    <Button Content="Send"
-                            Padding="12,8"
-                            Margin="0,0,8,0"
-                            Command="{Binding SubmitCommand}" />
-                    <Button Content="Vision Once"
-                            Padding="12,8"
-                            Command="{Binding SubmitVisionCommand}" />
-                </StackPanel>
-            </StackPanel>
-        </Border>
-
-        <Border Grid.Row="3"
-                Padding="14"
-                Margin="0,0,0,12"
-                CornerRadius="14"
-                Background="#1D1917"
-                BorderBrush="#3D332E"
-                BorderThickness="1">
-            <StackPanel>
-                <TextBlock Text="Updates"
-                           FontSize="15"
-                           FontWeight="SemiBold"
-                           Margin="0,0,0,10" />
-                <TextBlock Text="{Binding UpdateStatusMessage}"
-                           TextWrapping="Wrap"
-                           Foreground="#D9CEC3" />
-                <StackPanel Orientation="Horizontal"
-                            Margin="0,10,0,0">
-                    <Button Content="Check Updates"
-                            Padding="12,8"
-                            Margin="0,0,8,0"
-                            Command="{Binding RefreshUpdateCommand}" />
-                    <Button Content="Download"
-                            Padding="12,8"
-                            Margin="0,0,8,0"
-                            Command="{Binding DownloadUpdateCommand}" />
-                    <Button Content="Release Notes"
-                            Padding="12,8"
-                            Command="{Binding OpenReleaseNotesCommand}" />
-                </StackPanel>
-            </StackPanel>
-        </Border>
-
-        <Border Grid.Row="4"
-                Padding="14"
-                Margin="0,0,0,12"
-                CornerRadius="14"
-                Background="#1D1917"
-                BorderBrush="#3D332E"
-                BorderThickness="1">
-            <Grid>
+    <Grid>
+        <Grid.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#141212" Offset="0" />
+                <GradientStop Color="#181514" Offset="0.6" />
+                <GradientStop Color="#111111" Offset="1" />
+            </LinearGradientBrush>
+        </Grid.Background>
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="20">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <TextBlock Text="Recent Events"
-                           FontSize="15"
-                           FontWeight="SemiBold"
-                           Margin="0,0,0,10" />
-                <ListBox Grid.Row="1"
-                         ItemsSource="{Binding Events}"
-                         Background="#1D1917"
-                         BorderThickness="0"
-                         Foreground="#F2ECE6">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <Border Margin="0,0,0,8"
-                                    Padding="10"
-                                    CornerRadius="10"
-                                    Background="#2A2421">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Summary}"
-                                               FontWeight="SemiBold"
-                                               TextWrapping="Wrap" />
-                                    <TextBlock Margin="0,4,0,0"
-                                               Text="{Binding MetaLine}"
-                                               Foreground="#B7AAA0"
-                                               FontSize="12"
-                                               TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </Grid>
-        </Border>
 
-        <TextBlock Grid.Row="5"
-                   Text="{Binding LastResponse}"
-                   TextWrapping="Wrap"
-                   Foreground="#D9CEC3" />
+                <Border Grid.Row="0"
+                        Style="{StaticResource SectionCardStyle}"
+                        Margin="0,0,0,14"
+                        Background="#1A1716">
+                    <DockPanel LastChildFill="False">
+                        <StackPanel DockPanel.Dock="Left">
+                            <TextBlock Text="CALCIE"
+                                       Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="Windows tray beta"
+                                       Margin="0,6,0,0"
+                                       Foreground="{StaticResource WarningBrush}"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding RuntimeDetail}"
+                                       Margin="0,10,0,0"
+                                       Style="{StaticResource BodyTextStyle}" />
+                        </StackPanel>
+                        <Border DockPanel.Dock="Right"
+                                Padding="12,7"
+                                CornerRadius="999"
+                                Background="#2B2522"
+                                BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1">
+                            <TextBlock Text="{Binding RuntimeStateLabel}"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}" />
+                        </Border>
+                    </DockPanel>
+                </Border>
+
+                <Border Grid.Row="1"
+                        Style="{StaticResource SectionCardStyle}"
+                        Margin="0,0,0,14">
+                    <StackPanel>
+                        <TextBlock Text="Quick Actions"
+                                   Style="{StaticResource SectionTitleStyle}"
+                                   Margin="0,0,0,12" />
+                        <WrapPanel>
+                            <Button Content="Refresh"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="0,0,8,8"
+                                    Command="{Binding RefreshCommand}" />
+                            <Button Content="Restart Runtime"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="0,0,8,8"
+                                    Command="{Binding RestartRuntimeCommand}" />
+                            <Button Content="Talk"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Margin="0,0,8,8"
+                                    Command="{Binding StartVoiceCommand}" />
+                            <Button Content="Stop"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="0,0,8,8"
+                                    Command="{Binding StopVoiceCommand}" />
+                            <Button Content="Open Player"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="0,0,0,8"
+                                    Command="{Binding OpenPlayerCommand}" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="2"
+                        Style="{StaticResource SectionCardStyle}"
+                        Margin="0,0,0,14"
+                        Background="#211C19">
+                    <StackPanel>
+                        <TextBlock Text="Ask CALCIE"
+                                   Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="Send typed commands, or use Vision Once for a one-time screen check."
+                                   Style="{StaticResource BodyTextStyle}"
+                                   Margin="0,6,0,12" />
+                        <TextBox Text="{Binding PendingCommand, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource InputTextBoxStyle}"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 MinHeight="88" />
+                        <WrapPanel Margin="0,12,0,0">
+                            <Button Content="Send"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Margin="0,0,8,0"
+                                    Command="{Binding SubmitCommand}" />
+                            <Button Content="Vision Once"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Command="{Binding SubmitVisionCommand}" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="3"
+                        Style="{StaticResource SectionCardStyle}"
+                        Margin="0,0,0,14">
+                    <StackPanel>
+                        <DockPanel LastChildFill="False">
+                            <TextBlock Text="Updates"
+                                       Style="{StaticResource SectionTitleStyle}" />
+                            <Border DockPanel.Dock="Right"
+                                    Padding="10,5"
+                                    CornerRadius="999"
+                                    Background="#2B2522">
+                                <TextBlock Text="alpha"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontWeight="SemiBold" />
+                            </Border>
+                        </DockPanel>
+                        <TextBlock Text="{Binding UpdateStatusMessage}"
+                                   Style="{StaticResource BodyTextStyle}"
+                                   Margin="0,10,0,12" />
+                        <WrapPanel>
+                            <Button Content="Check Updates"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="0,0,8,0"
+                                    Command="{Binding RefreshUpdateCommand}" />
+                            <Button Content="Download"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Margin="0,0,8,0"
+                                    Command="{Binding DownloadUpdateCommand}" />
+                            <Button Content="Release Notes"
+                                    Style="{StaticResource GhostButtonStyle}"
+                                    Command="{Binding OpenReleaseNotesCommand}" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="4"
+                        Style="{StaticResource SectionCardStyle}"
+                        Margin="0,0,0,14">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Recent Events"
+                                   Style="{StaticResource SectionTitleStyle}"
+                                   Margin="0,0,0,12" />
+                        <ListBox Grid.Row="1"
+                                 Style="{StaticResource CalcieListBoxStyle}"
+                                 ItemsSource="{Binding Events}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,8"
+                                            Padding="12"
+                                            CornerRadius="12"
+                                            Background="{StaticResource SurfaceAltBrush}"
+                                            BorderBrush="{StaticResource BorderBrush}"
+                                            BorderThickness="1">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Summary}"
+                                                       FontWeight="SemiBold"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Margin="0,5,0,0"
+                                                       Text="{Binding MetaLine}"
+                                                       Foreground="{StaticResource TextMutedBrush}"
+                                                       FontSize="12"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="5"
+                        Style="{StaticResource SectionCardStyle}"
+                        Background="#171514">
+                    <StackPanel>
+                        <TextBlock Text="Last Response"
+                                   Style="{StaticResource SectionTitleStyle}"
+                                   Margin="0,0,0,8" />
+                        <TextBlock Text="{Binding LastResponse}"
+                                   Style="{StaticResource BodyTextStyle}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </ScrollViewer>
     </Grid>
 </Window>
