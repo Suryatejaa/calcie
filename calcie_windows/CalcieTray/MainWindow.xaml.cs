@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Windows;
-using System.Windows.Input;
 using CalcieTray.ViewModels;
 
 namespace CalcieTray;
@@ -17,9 +16,9 @@ public partial class MainWindow : Window
         DataContext = viewModel;
     }
 
-    private void PendingCommandTextBox_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    private void PendingCommandTextBox_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (e.Key != Key.Enter)
+        if (e.Key != System.Windows.Input.Key.Enter)
         {
             return;
         }
