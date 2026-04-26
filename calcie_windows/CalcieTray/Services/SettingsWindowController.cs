@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Threading;
 using CalcieTray.ViewModels;
 
 namespace CalcieTray.Services;
@@ -8,6 +9,7 @@ public sealed class SettingsWindowController : IDisposable
 {
     private readonly ShellViewModel _viewModel;
     private SettingsWindow? _settingsWindow;
+    private bool _opening;
 
     public SettingsWindowController(ShellViewModel viewModel)
     {
@@ -16,27 +18,50 @@ public sealed class SettingsWindowController : IDisposable
 
     public void ShowSettings()
     {
-        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+        if (_opening)
         {
-            EnsureWindow();
-            if (_settingsWindow is null)
-            {
-                return;
-            }
+            return;
+        }
 
-            if (!_settingsWindow.IsVisible)
+        _opening = true;
+        System.Windows.Application.Current.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
+        {
+            try
             {
-                _settingsWindow.Show();
-            }
+                EnsureWindow();
+                if (_settingsWindow is null)
+                {
+                    return;
+                }
 
-            if (_settingsWindow.WindowState == WindowState.Minimized)
+                if (_settingsWindow.WindowState == WindowState.Minimized)
+                {
+                    _settingsWindow.WindowState = WindowState.Normal;
+                }
+
+                if (!_settingsWindow.IsVisible)
+                {
+                    _settingsWindow.Show();
+                }
+
+                _settingsWindow.Topmost = true;
+                _settingsWindow.Activate();
+                _settingsWindow.Focus();
+                _settingsWindow.Topmost = false;
+            }
+            catch (Exception ex)
             {
-                _settingsWindow.WindowState = WindowState.Normal;
+                MessageBox.Show(
+                    $"CALCIE could not open Settings.\n\n{ex.Message}",
+                    "CALCIE",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
             }
-
-            _settingsWindow.Activate();
-            _settingsWindow.Focus();
-        });
+            finally
+            {
+                _opening = false;
+            }
+        }));
     }
 
     private void EnsureWindow()
