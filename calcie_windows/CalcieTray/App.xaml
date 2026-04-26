@@ -3,22 +3,22 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
-        <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#131212" />
-        <SolidColorBrush x:Key="SurfaceBrush" Color="#1D1A18" />
-        <SolidColorBrush x:Key="SurfaceAltBrush" Color="#241F1C" />
-        <SolidColorBrush x:Key="InputBrush" Color="#2B2522" />
-        <SolidColorBrush x:Key="BorderBrush" Color="#3B332E" />
-        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F5EEE8" />
-        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#C9BEB4" />
-        <SolidColorBrush x:Key="TextMutedBrush" Color="#A79789" />
-        <SolidColorBrush x:Key="AccentBrush" Color="#D88557" />
-        <SolidColorBrush x:Key="AccentHoverBrush" Color="#E3986D" />
-        <SolidColorBrush x:Key="AccentPressedBrush" Color="#BF7045" />
-        <SolidColorBrush x:Key="MutedButtonBrush" Color="#2F2925" />
-        <SolidColorBrush x:Key="MutedButtonHoverBrush" Color="#3A322D" />
-        <SolidColorBrush x:Key="MutedButtonPressedBrush" Color="#26211E" />
-        <SolidColorBrush x:Key="SuccessBrush" Color="#5ED087" />
-        <SolidColorBrush x:Key="WarningBrush" Color="#F5C46B" />
+        <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#0C0C0D" />
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#17181A" />
+        <SolidColorBrush x:Key="SurfaceAltBrush" Color="#1D1E22" />
+        <SolidColorBrush x:Key="InputBrush" Color="#202227" />
+        <SolidColorBrush x:Key="BorderBrush" Color="#2D3036" />
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F3F4F6" />
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#C8CCD3" />
+        <SolidColorBrush x:Key="TextMutedBrush" Color="#9399A4" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#F5F5F5" />
+        <SolidColorBrush x:Key="AccentHoverBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="AccentPressedBrush" Color="#D9DDE3" />
+        <SolidColorBrush x:Key="MutedButtonBrush" Color="#25282D" />
+        <SolidColorBrush x:Key="MutedButtonHoverBrush" Color="#30343A" />
+        <SolidColorBrush x:Key="MutedButtonPressedBrush" Color="#1F2227" />
+        <SolidColorBrush x:Key="SuccessBrush" Color="#8BE0AE" />
+        <SolidColorBrush x:Key="WarningBrush" Color="#E8EDF5" />
 
         <Style TargetType="Window">
             <Setter Property="Background" Value="{StaticResource WindowBackgroundBrush}" />
@@ -29,13 +29,13 @@
         </Style>
 
         <Style x:Key="PageTitleStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="22" />
+            <Setter Property="FontSize" Value="20" />
             <Setter Property="FontWeight" Value="Bold" />
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
         </Style>
 
         <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
         </Style>
@@ -43,23 +43,23 @@
         <Style x:Key="BodyTextStyle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
             <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="12.5" />
         </Style>
 
         <Style x:Key="SectionCardStyle" TargetType="Border">
-            <Setter Property="Padding" Value="16" />
-            <Setter Property="CornerRadius" Value="18" />
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="CornerRadius" Value="20" />
             <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
         </Style>
 
         <Style x:Key="PrimaryButtonStyle" TargetType="Button">
-            <Setter Property="Foreground" Value="#FFF7F1" />
+            <Setter Property="Foreground" Value="#101113" />
             <Setter Property="Background" Value="{StaticResource AccentBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="14,9" />
+            <Setter Property="Padding" Value="12,8" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Template">
@@ -69,7 +69,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="12"
+                                CornerRadius="14"
                                 SnapsToDevicePixels="True">
                             <ContentPresenter HorizontalAlignment="Center"
                                               VerticalAlignment="Center"
@@ -136,8 +136,8 @@
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="14,12" />
-            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="FontSize" Value="13" />
             <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -146,7 +146,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="14">
+                                CornerRadius="16">
                             <ScrollViewer x:Name="PART_ContentHost" Margin="0" />
                         </Border>
                         <ControlTemplate.Triggers>

@@ -70,7 +70,7 @@ public partial class MainWindow : Window
     private void PositionNearSystemTray()
     {
         var workArea = SystemParameters.WorkArea;
-        Left = Math.Max(workArea.Left + 12, workArea.Right - Width - 12);
-        Top = Math.Max(workArea.Top + 12, workArea.Bottom - Height - 12);
+        Left = Math.Max(workArea.Left + 10, workArea.Right - Width - 8);
+        Top = Math.Max(workArea.Top + 10, workArea.Bottom - Height - 6);
     }
 }
