@@ -29,13 +29,13 @@
         </Style>
 
         <Style x:Key="PageTitleStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontSize" Value="16.5" />
             <Setter Property="FontWeight" Value="Bold" />
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
         </Style>
 
         <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontSize" Value="12.5" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
         </Style>
@@ -43,12 +43,12 @@
         <Style x:Key="BodyTextStyle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
             <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="FontSize" Value="11.75" />
         </Style>
 
         <Style x:Key="SectionCardStyle" TargetType="Border">
-            <Setter Property="Padding" Value="10" />
-            <Setter Property="CornerRadius" Value="20" />
+            <Setter Property="Padding" Value="8" />
+            <Setter Property="CornerRadius" Value="14" />
             <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
@@ -59,9 +59,10 @@
             <Setter Property="Background" Value="{StaticResource AccentBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Padding" Value="10,6" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="12.25" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
@@ -69,7 +70,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="14"
+                                CornerRadius="10"
                                 SnapsToDevicePixels="True">
                             <ContentPresenter HorizontalAlignment="Center"
                                               VerticalAlignment="Center"
@@ -104,7 +105,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="12"
+                                CornerRadius="10"
                                 SnapsToDevicePixels="True">
                             <ContentPresenter HorizontalAlignment="Center"
                                               VerticalAlignment="Center"
@@ -132,11 +133,11 @@
         </Style>
 
         <Style x:Key="IconButtonStyle" TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
-            <Setter Property="Width" Value="44" />
-            <Setter Property="Height" Value="44" />
+            <Setter Property="Width" Value="38" />
+            <Setter Property="Height" Value="38" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
-            <Setter Property="FontSize" Value="17" />
+            <Setter Property="FontSize" Value="15" />
             <Setter Property="FontWeight" Value="Normal" />
         </Style>
 
@@ -145,8 +146,8 @@
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="12,10" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="FontSize" Value="12.25" />
             <Setter Property="CaretBrush" Value="{StaticResource AccentBrush}" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -155,7 +156,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="16">
+                                CornerRadius="11">
                             <ScrollViewer x:Name="PART_ContentHost" Margin="0" />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -176,8 +177,8 @@
         </Style>
 
         <Style TargetType="ScrollBar">
-            <Setter Property="Width" Value="8" />
-            <Setter Property="Height" Value="8" />
+            <Setter Property="Width" Value="6" />
+            <Setter Property="Height" Value="6" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -194,11 +195,11 @@
                                     <Thumb Background="#7A8B939E"
                                            BorderThickness="0"
                                            Height="42"
-                                           Width="8">
+                                           Width="6">
                                         <Thumb.Template>
                                             <ControlTemplate TargetType="Thumb">
                                                 <Border Background="{TemplateBinding Background}"
-                                                        CornerRadius="4" />
+                                                        CornerRadius="3" />
                                             </ControlTemplate>
                                         </Thumb.Template>
                                     </Thumb>
@@ -215,11 +216,11 @@
             </Setter>
             <Style.Triggers>
                 <Trigger Property="Orientation" Value="Horizontal">
-                    <Setter Property="Height" Value="8" />
+                    <Setter Property="Height" Value="6" />
                     <Setter Property="Width" Value="Auto" />
                 </Trigger>
                 <Trigger Property="Orientation" Value="Vertical">
-                    <Setter Property="Width" Value="8" />
+                    <Setter Property="Width" Value="6" />
                 </Trigger>
             </Style.Triggers>
         </Style>
