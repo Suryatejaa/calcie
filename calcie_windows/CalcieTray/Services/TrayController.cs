@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -90,8 +91,32 @@ public sealed class TrayController : IDisposable
     private static Icon BuildTrayIcon()
     {
         using Stream? stream = typeof(TrayController).Assembly.GetManifestResourceStream("CalcieTray.Assets.calcie-logo.png");
-        using var bitmap = stream is not null ? new Bitmap(stream) : new Bitmap(64, 64);
-        using var iconBitmap = new Bitmap(bitmap, new System.Drawing.Size(64, 64));
+        using var sourceBitmap = stream is not null ? new Bitmap(stream) : new Bitmap(500, 500);
+        using var iconBitmap = new Bitmap(64, 64);
+        using (var graphics = Graphics.FromImage(iconBitmap))
+        {
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            graphics.Clear(Color.Transparent);
+
+            using var shadowBrush = new SolidBrush(Color.FromArgb(70, 0, 0, 0));
+            using var cardBrush = new SolidBrush(Color.FromArgb(255, 18, 18, 20));
+            using var cardBorder = new Pen(Color.FromArgb(255, 52, 52, 58), 2f);
+
+            var shadowRect = new RectangleF(6f, 8f, 52f, 52f);
+            var cardRect = new RectangleF(4f, 6f, 52f, 52f);
+
+            using var shadowPath = CreateRoundedRectangle(shadowRect, 15f);
+            using var cardPath = CreateRoundedRectangle(cardRect, 15f);
+            graphics.FillPath(shadowBrush, shadowPath);
+            graphics.FillPath(cardBrush, cardPath);
+            graphics.DrawPath(cardBorder, cardPath);
+
+            var logoRect = new RectangleF(12f, 14f, 36f, 36f);
+            graphics.DrawImage(sourceBitmap, logoRect);
+        }
+
         var iconHandle = iconBitmap.GetHicon();
         try
         {
@@ -101,6 +126,20 @@ public sealed class TrayController : IDisposable
         {
             DestroyIcon(iconHandle);
         }
+    }
+
+    private static GraphicsPath CreateRoundedRectangle(RectangleF rect, float radius)
+    {
+        var diameter = radius * 2f;
+        var path = new GraphicsPath();
+
+        path.AddArc(rect.X, rect.Y, diameter, diameter, 180, 90);
+        path.AddArc(rect.Right - diameter, rect.Y, diameter, diameter, 270, 90);
+        path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(rect.X, rect.Bottom - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+
+        return path;
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
