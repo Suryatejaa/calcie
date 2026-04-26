@@ -18,14 +18,14 @@ public partial class MainWindow : Window
 
     public void ShowAsTrayPopup()
     {
-        PositionNearSystemTray();
+        PositionNearTrayPoint(null);
         _lastTrayShowUtc = DateTime.UtcNow;
         Show();
         Activate();
         Focus();
     }
 
-    public void ToggleTrayPopup()
+    public void ToggleTrayPopup(System.Drawing.Point? trayPoint = null)
     {
         if (IsVisible)
         {
@@ -33,7 +33,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        ShowAsTrayPopup();
+        PositionNearTrayPoint(trayPoint);
+        _lastTrayShowUtc = DateTime.UtcNow;
+        Show();
+        Activate();
+        Focus();
     }
 
     protected override void OnDeactivated(EventArgs e)
@@ -67,10 +71,17 @@ public partial class MainWindow : Window
         Hide();
     }
 
-    private void PositionNearSystemTray()
+    private void PositionNearTrayPoint(System.Drawing.Point? trayPoint)
     {
         var workArea = SystemParameters.WorkArea;
-        Left = Math.Max(workArea.Left + 10, workArea.Right - Width - 8);
-        Top = Math.Max(workArea.Top + 10, workArea.Bottom - Height - 6);
+        if (trayPoint is { } point)
+        {
+            Left = Math.Max(workArea.Left + 8, Math.Min(workArea.Right - Width - 6, point.X - Width + 26));
+            Top = Math.Max(workArea.Top + 8, Math.Min(workArea.Bottom - Height - 4, point.Y - Height - 10));
+            return;
+        }
+
+        Left = Math.Max(workArea.Left + 8, workArea.Right - Width - 6);
+        Top = Math.Max(workArea.Top + 8, workArea.Bottom - Height - 4);
     }
 }
