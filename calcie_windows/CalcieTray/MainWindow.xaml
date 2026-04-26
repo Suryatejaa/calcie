@@ -108,13 +108,10 @@
                     </Grid.ColumnDefinitions>
 
                     <Button Grid.Column="0"
-                            Width="44"
-                            Height="44"
                             Margin="0,0,10,0"
                             Command="{Binding StartVoiceCommand}"
-                            Style="{StaticResource SecondaryButtonStyle}"
-                            FontSize="21"
-                            Content="🎤" />
+                            Style="{StaticResource IconButtonStyle}"
+                            Content="&#xE720;" />
 
                     <TextBox x:Name="PendingCommandTextBox"
                              Grid.Column="1"
@@ -135,13 +132,10 @@
                              ToolTip="Press Enter to send." />
 
                     <Button Grid.Column="2"
-                            Width="42"
-                            Height="42"
                             Margin="0,0,8,0"
                             Command="{Binding SubmitVisionCommand}"
-                            Style="{StaticResource SecondaryButtonStyle}"
-                            FontSize="16"
-                            Content="👁" />
+                            Style="{StaticResource IconButtonStyle}"
+                            Content="&#xE8A7;" />
 
                     <Button Grid.Column="3"
                             Width="42"
