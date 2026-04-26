@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using CalcieTray.Services;
 using CalcieTray.ViewModels;
 
@@ -17,6 +18,7 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         _viewModel = new ShellViewModel();
         _mainWindow = new MainWindow(_viewModel);
@@ -64,12 +66,23 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        DispatcherUnhandledException -= OnDispatcherUnhandledException;
         _hotkeyService?.Dispose();
         _trayController?.Dispose();
         _playerWindowController?.Dispose();
         _settingsWindowController?.Dispose();
         _viewModel?.Dispose();
         base.OnExit(e);
+    }
+
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true;
+        MessageBox.Show(
+            $"CALCIE hit an unexpected Windows UI error.\n\n{e.Exception.Message}",
+            "CALCIE",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
     }
 
     private static BitmapFrame? TryLoadLogo()
