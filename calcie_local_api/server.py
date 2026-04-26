@@ -147,6 +147,16 @@ class DesktopRuntime:
         return {"ok": True, "response": "Voice capture started.", "state": "listening"}
 
     def stop_voice(self) -> Dict[str, Any]:
+        self._voice_cancel_requested = True
+
+        if not (self._voice_thread and self._voice_thread.is_alive()):
+            self.calcie._set_runtime_state("idle", "Ready")
+            return {
+                "ok": True,
+                "response": "Voice capture is not active.",
+                "state": "idle",
+            }
+
         self.calcie._set_runtime_state("listening", "Finishing current voice capture")
         self.calcie._record_runtime_event(
             "voice",

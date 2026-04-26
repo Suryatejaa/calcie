@@ -236,16 +236,15 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
     {
         if (!VoiceSessionActive)
         {
+            // Set immediately so key-release can still stop capture before the next status poll.
+            VoiceSessionActive = true;
             await StartVoiceAsync();
         }
     }
 
     public async Task EndPushToTalkAsync()
     {
-        if (VoiceSessionActive)
-        {
-            await StopVoiceAsync();
-        }
+        await StopVoiceAsync();
     }
 
     public async Task RestartRuntimeAsync()
@@ -343,7 +342,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
     {
         var events = await _client.EventsAsync(cancellationToken: _shutdown.Token);
 
-        Application.Current.Dispatcher.Invoke(() =>
+        System.Windows.Application.Current.Dispatcher.Invoke(() =>
         {
             Events.Clear();
             foreach (var item in events)
