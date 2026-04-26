@@ -72,6 +72,9 @@ public sealed class RuntimeStatus
 
     [JsonPropertyName("voice_session_active")]
     public bool? VoiceSessionActive { get; set; }
+
+    [JsonPropertyName("profile_import")]
+    public ProfileImportStatus? ProfileImport { get; set; }
 }
 
 public sealed class CommandResponse
@@ -138,4 +141,46 @@ public sealed class UpdateRelease
 
     [JsonPropertyName("created_at")]
     public string CreatedAt { get; set; } = "";
+}
+
+public sealed class ProfileImportStatus
+{
+    [JsonPropertyName("ok")]
+    public bool? Ok { get; set; }
+
+    [JsonPropertyName("has_profile")]
+    public bool HasProfile { get; set; }
+
+    [JsonPropertyName("profile_file")]
+    public string ProfileFile { get; set; } = "";
+
+    [JsonPropertyName("has_chatgpt_import")]
+    public bool HasChatGptImport { get; set; }
+
+    [JsonPropertyName("imported_at")]
+    public string ImportedAt { get; set; } = "";
+
+    [JsonPropertyName("imported_chars")]
+    public int ImportedChars { get; set; }
+
+    [JsonPropertyName("import_prompt")]
+    public string ImportPrompt { get; set; } = "";
+}
+
+public sealed class ProfileImportResponse
+{
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+
+    [JsonPropertyName("response")]
+    public string Response { get; set; } = "";
+
+    [JsonPropertyName("profile_file")]
+    public string? ProfileFile { get; set; }
+
+    [JsonPropertyName("imported_at")]
+    public string? ImportedAt { get; set; }
+
+    [JsonPropertyName("imported_chars")]
+    public int? ImportedChars { get; set; }
 }

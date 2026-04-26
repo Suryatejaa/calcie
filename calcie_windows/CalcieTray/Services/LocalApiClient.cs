@@ -55,6 +55,12 @@ public sealed class LocalApiClient
     public Task<CommandResponse?> RestartRuntimeAsync(CancellationToken cancellationToken = default) =>
         PostAsync<CommandResponse>("runtime/restart", new { }, cancellationToken);
 
+    public Task<ProfileImportStatus?> ProfileImportStatusAsync(CancellationToken cancellationToken = default) =>
+        GetAsync<ProfileImportStatus>("profile/import-status", cancellationToken);
+
+    public Task<ProfileImportResponse?> ImportChatGptProfileAsync(string text, CancellationToken cancellationToken = default) =>
+        PostAsync<ProfileImportResponse>("profile/import-chatgpt", new { text }, cancellationToken);
+
     public async Task<UpdateManifestEnvelope?> LatestReleaseAsync(string baseUrl, string platform, string channel, CancellationToken cancellationToken = default)
     {
         using var httpClient = new HttpClient
