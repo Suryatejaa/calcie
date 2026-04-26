@@ -5,33 +5,33 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="CALCIE"
-        Width="430"
-        Height="640"
-        MinWidth="430"
-        MaxWidth="430"
-        MinHeight="640"
-        MaxHeight="640"
+        Width="408"
+        Height="566"
+        MinWidth="408"
+        MaxWidth="408"
+        MinHeight="566"
+        MaxHeight="566"
         WindowStyle="None"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         Topmost="True"
         AllowsTransparency="True"
         Background="Transparent"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="Manual">
     <Border CornerRadius="28"
-            Background="#E60B0B0C"
-            BorderBrush="#40343A40"
+            Background="#D60A0B0C"
+            BorderBrush="#4A444B52"
             BorderThickness="1"
-            Padding="10">
+            Padding="8">
         <Grid>
             <Grid.Background>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#F00E0E10" Offset="0" />
-                    <GradientStop Color="#F0131315" Offset="0.55" />
-                    <GradientStop Color="#F00B0C0E" Offset="1" />
+                    <GradientStop Color="#C2141518" Offset="0" />
+                    <GradientStop Color="#CE101114" Offset="0.58" />
+                    <GradientStop Color="#BC0A0B0D" Offset="1" />
                 </LinearGradientBrush>
             </Grid.Background>
-            <Grid Margin="12">
+            <Grid Margin="10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -43,8 +43,8 @@
 
                 <Border Grid.Row="0"
                         Style="{StaticResource SectionCardStyle}"
-                        Margin="0,0,0,10"
-                        Background="#AA141517">
+                        Margin="0,0,0,8"
+                        Background="#8E15171A">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -54,18 +54,18 @@
                             <TextBlock Text="CALCIE"
                                        Style="{StaticResource PageTitleStyle}" />
                             <TextBlock Text="Windows tray beta"
-                                       Margin="0,4,0,0"
+                                       Margin="0,3,0,0"
                                        Foreground="{StaticResource WarningBrush}"
                                        FontWeight="SemiBold" />
                             <TextBlock Text="{Binding RuntimeDetail}"
-                                       Margin="0,8,0,0"
+                                       Margin="0,6,0,0"
                                        Style="{StaticResource BodyTextStyle}" />
                         </StackPanel>
                         <Border Grid.Column="1"
                                 Margin="10,0,0,0"
-                                Padding="10,6"
-                                CornerRadius="18"
-                                Background="#991E2126"
+                                Padding="9,6"
+                                CornerRadius="16"
+                                Background="#7C202329"
                                 BorderBrush="{StaticResource BorderBrush}"
                                 BorderThickness="1">
                             <TextBlock Text="{Binding RuntimeStateLabel}"
@@ -78,32 +78,32 @@
 
                 <Border Grid.Row="1"
                         Style="{StaticResource SectionCardStyle}"
-                        Margin="0,0,0,10"
-                        Background="#AA141517">
+                        Margin="0,0,0,8"
+                        Background="#8815171A">
                     <StackPanel>
                         <TextBlock Text="Quick Actions"
                                    Style="{StaticResource SectionTitleStyle}"
-                                   Margin="0,0,0,8" />
+                                   Margin="0,0,0,6" />
                         <WrapPanel>
                             <Button Content="Refresh"
                                     Style="{StaticResource SecondaryButtonStyle}"
-                                    Margin="0,0,6,6"
+                                    Margin="0,0,5,5"
                                     Command="{Binding RefreshCommand}" />
                             <Button Content="Restart Runtime"
                                     Style="{StaticResource SecondaryButtonStyle}"
-                                    Margin="0,0,6,6"
+                                    Margin="0,0,5,5"
                                     Command="{Binding RestartRuntimeCommand}" />
                             <Button Content="Talk"
                                     Style="{StaticResource PrimaryButtonStyle}"
-                                    Margin="0,0,6,6"
+                                    Margin="0,0,5,5"
                                     Command="{Binding StartVoiceCommand}" />
                             <Button Content="Stop"
                                     Style="{StaticResource SecondaryButtonStyle}"
-                                    Margin="0,0,6,6"
+                                    Margin="0,0,5,5"
                                     Command="{Binding StopVoiceCommand}" />
                             <Button Content="Open Player"
                                     Style="{StaticResource SecondaryButtonStyle}"
-                                    Margin="0,0,0,6"
+                                    Margin="0,0,0,5"
                                     Command="{Binding OpenPlayerCommand}" />
                         </WrapPanel>
                     </StackPanel>
@@ -111,24 +111,24 @@
 
                 <Border Grid.Row="2"
                         Style="{StaticResource SectionCardStyle}"
-                        Margin="0,0,0,10"
-                        Background="#AA151618">
+                        Margin="0,0,0,8"
+                        Background="#8816181B">
                     <StackPanel>
                         <TextBlock Text="Ask CALCIE"
                                    Style="{StaticResource SectionTitleStyle}" />
                         <TextBlock Text="Send typed commands, or use Vision Once for a one-time screen check."
                                    Style="{StaticResource BodyTextStyle}"
-                                   Margin="0,4,0,8" />
+                                   Margin="0,3,0,7" />
                         <TextBox Text="{Binding PendingCommand, UpdateSourceTrigger=PropertyChanged}"
                                  Style="{StaticResource InputTextBoxStyle}"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
-                                 Height="76"
-                                 MaxHeight="76" />
-                        <WrapPanel Margin="0,8,0,0">
+                                 Height="68"
+                                 MaxHeight="68" />
+                        <WrapPanel Margin="0,7,0,0">
                             <Button Content="Send"
                                     Style="{StaticResource PrimaryButtonStyle}"
-                                    Margin="0,0,6,0"
+                                    Margin="0,0,5,0"
                                     Command="{Binding SubmitCommand}" />
                             <Button Content="Vision Once"
                                     Style="{StaticResource SecondaryButtonStyle}"
@@ -139,8 +139,8 @@
 
                 <Border Grid.Row="3"
                         Style="{StaticResource SectionCardStyle}"
-                        Margin="0,0,0,10"
-                        Background="#AA141517">
+                        Margin="0,0,0,8"
+                        Background="#8815171A">
                     <StackPanel>
                         <DockPanel LastChildFill="False">
                             <TextBlock Text="Updates"
@@ -148,7 +148,7 @@
                             <Border DockPanel.Dock="Right"
                                     Padding="8,4"
                                     CornerRadius="999"
-                                    Background="#991E2126">
+                                    Background="#7C202329">
                                 <TextBlock Text="alpha"
                                            FontSize="11.5"
                                            Foreground="{StaticResource TextSecondaryBrush}"
@@ -157,15 +157,15 @@
                         </DockPanel>
                         <TextBlock Text="{Binding UpdateStatusMessage}"
                                    Style="{StaticResource BodyTextStyle}"
-                                   Margin="0,8,0,8" />
+                                   Margin="0,6,0,7" />
                         <WrapPanel>
                             <Button Content="Check Updates"
                                     Style="{StaticResource SecondaryButtonStyle}"
-                                    Margin="0,0,6,0"
+                                    Margin="0,0,5,0"
                                     Command="{Binding RefreshUpdateCommand}" />
                             <Button Content="Download"
                                     Style="{StaticResource PrimaryButtonStyle}"
-                                    Margin="0,0,6,0"
+                                    Margin="0,0,5,0"
                                     Command="{Binding DownloadUpdateCommand}" />
                             <Button Content="Release Notes"
                                     Style="{StaticResource GhostButtonStyle}"
@@ -176,8 +176,8 @@
 
                 <Border Grid.Row="4"
                         Style="{StaticResource SectionCardStyle}"
-                        Margin="0,0,0,10"
-                        Background="#AA141517">
+                        Margin="0,0,0,8"
+                        Background="#8815171A">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -185,16 +185,16 @@
                         </Grid.RowDefinitions>
                         <TextBlock Text="Recent Events"
                                    Style="{StaticResource SectionTitleStyle}"
-                                   Margin="0,0,0,8" />
+                                   Margin="0,0,0,6" />
                         <ListBox Grid.Row="1"
-                                 Height="120"
-                                 MaxHeight="120"
+                                 Height="92"
+                                 MaxHeight="92"
                                  Style="{StaticResource CalcieListBoxStyle}"
                                  ItemsSource="{Binding Events}">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <Border Margin="0,0,0,8"
-                                            Padding="10"
+                                            Padding="9"
                                             CornerRadius="14"
                                             Background="{StaticResource SurfaceAltBrush}"
                                             BorderBrush="{StaticResource BorderBrush}"
@@ -219,14 +219,14 @@
 
                 <Border Grid.Row="5"
                         Style="{StaticResource SectionCardStyle}"
-                        Background="#AA111214">
+                        Background="#7A111214">
                     <StackPanel>
                         <TextBlock Text="Last Response"
                                    Style="{StaticResource SectionTitleStyle}"
-                                   Margin="0,0,0,6" />
+                                   Margin="0,0,0,5" />
                         <TextBlock Text="{Binding LastResponse}"
                                    Style="{StaticResource BodyTextStyle}"
-                                   MaxHeight="74" />
+                                   MaxHeight="56" />
                     </StackPanel>
                 </Border>
             </Grid>
