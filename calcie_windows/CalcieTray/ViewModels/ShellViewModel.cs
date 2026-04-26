@@ -399,7 +399,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
     {
         try
         {
-            Clipboard.SetText(ProfileImportPrompt);
+            System.Windows.Clipboard.SetText(ProfileImportPrompt);
             ProfileImportMessage = "Prompt copied. Paste it into ChatGPT, then paste the fenced response here.";
         }
         catch (Exception ex)
