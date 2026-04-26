@@ -161,6 +161,13 @@ class AppAccessSkill:
                     label = canonical_name.strip() or app_name.strip()
                     return self._open_url_in_browser(self.web_aliases[app_lower], label.title())
                 return f"Failed to open {app_target}: {err}"
+            if sys.platform == "win32":
+                if self._open_app_windows(app_lower, app_target):
+                    return f"Opening {app_target}..."
+                if app_lower in self.web_aliases:
+                    label = canonical_name.strip() or app_name.strip()
+                    return self._open_url_in_browser(self.web_aliases[app_lower], label.title())
+                return f"Failed to open {app_target}: Windows could not find a launch target."
             if sys.platform.startswith("linux"):
                 subprocess.Popen([app_lower], start_new_session=True)
                 return f"Opening {app_target}..."
@@ -220,6 +227,13 @@ class AppAccessSkill:
                     if allow_default_browser_fallback and self._open_url_default_linux(url):
                         return f"Could not find {app_target}. Opened {target} in the default browser."
                     raise
+
+            if sys.platform == "win32":
+                if self._open_url_in_windows_app(app_lower, url):
+                    return f"Opening {target} in {app_target}..."
+                if allow_default_browser_fallback and self._open_url_default_windows(url):
+                    return f"Could not find {app_target}. Opened {target} in the default browser."
+                return f"Failed to open {target} in {app_target}: Windows could not launch the target."
 
             return "Open target in app is not supported on this platform."
         except Exception as exc:
@@ -311,6 +325,68 @@ class AppAccessSkill:
             return bool(webbrowser.open(url))
         except Exception:
             return False
+
+    def _open_url_default_windows(self, url: str) -> bool:
+        if sys.platform != "win32":
+            return False
+        try:
+            os.startfile(url)  # type: ignore[attr-defined]
+            return True
+        except Exception:
+            try:
+                return bool(webbrowser.open(url))
+            except Exception:
+                return False
+
+    def _open_app_windows(self, app_lower: str, app_target: str) -> bool:
+        if sys.platform != "win32":
+            return False
+
+        windows_launch_map = {
+            "chrome": "chrome",
+            "google chrome": "chrome",
+            "edge": "msedge",
+            "microsoft edge": "msedge",
+            "firefox": "firefox",
+            "terminal": "wt",
+            "windows terminal": "wt",
+            "powershell": "powershell",
+            "cmd": "cmd",
+            "visual studio code": "code",
+            "vscode": "code",
+            "spotify": "spotify",
+            "discord": "discord",
+            "slack": "slack",
+            "instagram": "instagram",
+        }
+        launch_target = windows_launch_map.get(app_lower) or windows_launch_map.get(app_target.lower()) or app_target
+        try:
+            subprocess.Popen(["cmd", "/c", "start", "", launch_target], shell=False)
+            return True
+        except Exception:
+            return False
+
+    def _open_url_in_windows_app(self, app_lower: str, url: str) -> bool:
+        if sys.platform != "win32":
+            return False
+
+        browser_map = {
+            "chrome": "chrome",
+            "google chrome": "chrome",
+            "edge": "msedge",
+            "microsoft edge": "msedge",
+            "firefox": "firefox",
+        }
+        browser_target = browser_map.get(app_lower)
+        if browser_target:
+            try:
+                subprocess.Popen(["cmd", "/c", "start", "", browser_target, url], shell=False)
+                return True
+            except Exception:
+                return False
+
+        # For non-browser targets on Windows, fall back to default URL handling.
+        return self._open_url_default_windows(url)
 
     def _extract_open_target_in_app_command(self, user_input: str) -> Optional[Tuple[str, str]]:
         raw = (user_input or "").strip()
