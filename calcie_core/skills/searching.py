@@ -480,14 +480,16 @@ class SearchingSkill:
             },
         ]
         try:
-            return self.llm_collect_text(
+            response = self.llm_collect_text(
                 messages,
                 max_output_tokens=140,
                 forced_provider=provider,
             ).strip()
+            return "" if self._looks_like_llm_failure_text(response) else response
         except TypeError:
             try:
-                return self.llm_collect_text(messages, max_output_tokens=140).strip()
+                response = self.llm_collect_text(messages, max_output_tokens=140).strip()
+                return "" if self._looks_like_llm_failure_text(response) else response
             except Exception:
                 return ""
         except Exception:
@@ -1011,13 +1013,13 @@ class SearchingSkill:
             provider = "auto"
 
         if provider == "auto":
-            order = ["tavily", "exa", "ddgs"]
+            order = ["tavily", "exa", "ddgs", "duckduckgo_html"]
         elif provider == "tavily":
-            order = ["tavily", "exa", "ddgs"]
+            order = ["tavily", "exa", "ddgs", "duckduckgo_html"]
         elif provider == "exa":
-            order = ["exa", "tavily", "ddgs"]
+            order = ["exa", "tavily", "ddgs", "duckduckgo_html"]
         else:
-            order = ["ddgs", "tavily", "exa"]
+            order = ["ddgs", "duckduckgo_html", "tavily", "exa"]
 
         attempts: List[str] = []
         for name in order:
@@ -1045,6 +1047,12 @@ class SearchingSkill:
                     attempts.append("ddgs:ok")
                     return results, "ddgs", attempts
                 attempts.append(f"ddgs:{reason}")
+            if name == "duckduckgo_html":
+                results, reason = self._search_duckduckgo_html(query)
+                if results:
+                    attempts.append("duckduckgo_html:ok")
+                    return results, "duckduckgo_html", attempts
+                attempts.append(f"duckduckgo_html:{reason}")
         return [], "none", attempts
 
     def _search_jobs(self, query: str) -> Tuple[List[Dict[str, str]], str, List[str]]:
@@ -1242,6 +1250,58 @@ class SearchingSkill:
             return [], "ddgs_empty"
         return out, "ok"
 
+    def _search_duckduckgo_html(self, query: str) -> Tuple[List[Dict[str, str]], str]:
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
+        html_text, err = self._fetch_url_raw_text(
+            url,
+            max_bytes=350_000,
+            timeout=max(self.page_fetch_timeout_s, 8),
+        )
+        if not html_text:
+            return [], f"http_error:{(err or 'unknown')[:80]}"
+
+        out: List[Dict[str, str]] = []
+        seen = set()
+        pattern = re.compile(
+            r'<a[^>]+class="result__a"[^>]+href="(?P<href>[^"]+)"[^>]*>(?P<title>.*?)</a>',
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        snippets = re.findall(
+            r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>|<div[^>]+class="result__snippet"[^>]*>(.*?)</div>',
+            html_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        snippet_list = []
+        for first, second in snippets:
+            snippet_html = first or second or ""
+            snippet_text = re.sub(r"(?s)<[^>]+>", " ", unescape(snippet_html))
+            snippet_text = re.sub(r"\s+", " ", snippet_text).strip()
+            snippet_list.append(snippet_text)
+
+        for index, match in enumerate(pattern.finditer(html_text)):
+            href = unescape(match.group("href") or "").strip()
+            title_html = match.group("title") or ""
+            title = re.sub(r"(?s)<[^>]+>", " ", unescape(title_html))
+            title = re.sub(r"\s+", " ", title).strip() or "Untitled"
+            resolved_url = self._resolve_duckduckgo_redirect(href)
+            if not resolved_url or resolved_url in seen:
+                continue
+            seen.add(resolved_url)
+            out.append(
+                {
+                    "title": title,
+                    "url": resolved_url,
+                    "text": "",
+                    "snippet": snippet_list[index] if index < len(snippet_list) else "",
+                }
+            )
+            if len(out) >= self.ddgs_fallback_results:
+                break
+
+        if not out:
+            return [], "duckduckgo_empty"
+        return out, "ok"
+
     def _scrape_results(self, results: List[Dict[str, str]]) -> List[Dict[str, str]]:
         scraped = []
         for item in results[: self.scrape_top_k]:
@@ -1313,7 +1373,7 @@ class SearchingSkill:
             summary = self.llm_collect_text(messages, max_output_tokens=self.synth_tokens, **llm_kwargs)
         except TypeError:
             summary = self.llm_collect_text(messages, max_output_tokens=self.synth_tokens)
-        if summary and "model error" not in summary.lower():
+        if summary and not self._looks_like_llm_failure_text(summary):
             cleaned = summary.strip()
             if self._is_summary_acceptable(query, cleaned):
                 return cleaned
@@ -1321,6 +1381,31 @@ class SearchingSkill:
         if deterministic:
             return deterministic
         return "I found relevant sources, but synthesis is unavailable right now."
+
+    def _looks_like_llm_failure_text(self, text: str) -> bool:
+        lowered = (text or "").strip().lower()
+        if not lowered:
+            return True
+        bad_markers = {
+            "model error",
+            "selected llm is unavailable or failed",
+            "configure the provider api key",
+            "provider api key",
+            "i hit a model error",
+            "synthesis is unavailable",
+            "llm is unavailable",
+        }
+        return any(marker in lowered for marker in bad_markers)
+
+    def _resolve_duckduckgo_redirect(self, href: str) -> str:
+        if not href:
+            return ""
+        parsed = urllib.parse.urlparse(href)
+        if "duckduckgo.com" not in parsed.netloc:
+            return href
+        params = urllib.parse.parse_qs(parsed.query)
+        target = (params.get("uddg") or [""])[0].strip()
+        return urllib.parse.unquote(target) if target else href
 
     def _normalize(self, text: str) -> str:
         return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", (text or "").lower())).strip()
