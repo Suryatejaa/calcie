@@ -18,7 +18,7 @@ public partial class App : System.Windows.Application
     private HotkeyService? _hotkeyService;
     private DispatcherTimer? _playerCommandTimer;
     private string? _lastPlayerCommandId;
-    private string? _playerCommandFilePath;
+    private List<string> _playerCommandFilePaths = new();
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -65,7 +65,7 @@ public partial class App : System.Windows.Application
             };
         }
 
-        _playerCommandFilePath = ResolvePlayerCommandFilePath();
+        _playerCommandFilePaths = ResolvePlayerCommandFilePaths();
         _playerCommandTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(700)
@@ -117,41 +117,45 @@ public partial class App : System.Windows.Application
 
     private void OnPlayerCommandTimerTick(object? sender, EventArgs e)
     {
-        if (_playerWindowController is null || string.IsNullOrWhiteSpace(_playerCommandFilePath))
+        if (_playerWindowController is null || _playerCommandFilePaths.Count == 0)
         {
             return;
         }
 
-        try
+        foreach (var commandPath in _playerCommandFilePaths)
         {
-            if (!File.Exists(_playerCommandFilePath))
+            try
             {
+                if (!File.Exists(commandPath))
+                {
+                    continue;
+                }
+
+                var raw = File.ReadAllText(commandPath);
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    continue;
+                }
+
+                var command = JsonSerializer.Deserialize<PlayerCommandPayload>(raw);
+                if (command is null || string.IsNullOrWhiteSpace(command.RequestId))
+                {
+                    continue;
+                }
+
+                if (string.Equals(command.RequestId, _lastPlayerCommandId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                _lastPlayerCommandId = command.RequestId;
+                HandlePlayerCommand(command);
                 return;
             }
-
-            var raw = File.ReadAllText(_playerCommandFilePath);
-            if (string.IsNullOrWhiteSpace(raw))
+            catch
             {
-                return;
+                // Keep the shell resilient if the file is mid-write or malformed.
             }
-
-            var command = JsonSerializer.Deserialize<PlayerCommandPayload>(raw);
-            if (command is null || string.IsNullOrWhiteSpace(command.RequestId))
-            {
-                return;
-            }
-
-            if (string.Equals(command.RequestId, _lastPlayerCommandId, StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            _lastPlayerCommandId = command.RequestId;
-            HandlePlayerCommand(command);
-        }
-        catch
-        {
-            // Keep the shell resilient if the file is mid-write or malformed.
         }
     }
 
@@ -196,12 +200,29 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private static string ResolvePlayerCommandFilePath()
+    private static List<string> ResolvePlayerCommandFilePaths()
     {
+        var candidates = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            var full = Path.GetFullPath(path);
+            if (seen.Add(full))
+            {
+                candidates.Add(full);
+            }
+        }
+
         var projectRoot = Environment.GetEnvironmentVariable("CALCIE_PROJECT_ROOT");
         if (!string.IsNullOrWhiteSpace(projectRoot))
         {
-            return Path.Combine(projectRoot, ".calcie", "runtime", "media_player_command.json");
+            Add(Path.Combine(projectRoot, ".calcie", "runtime", "media_player_command.json"));
         }
 
         var current = new DirectoryInfo(AppContext.BaseDirectory);
@@ -209,13 +230,23 @@ public partial class App : System.Windows.Application
         {
             if (File.Exists(Path.Combine(current.FullName, "calcie.py")))
             {
-                return Path.Combine(current.FullName, ".calcie", "runtime", "media_player_command.json");
+                Add(Path.Combine(current.FullName, ".calcie", "runtime", "media_player_command.json"));
+                break;
             }
 
             current = current.Parent;
         }
 
-        return Path.Combine(AppContext.BaseDirectory, ".calcie", "runtime", "media_player_command.json");
+        try
+        {
+            Add(Path.Combine(Directory.GetCurrentDirectory(), ".calcie", "runtime", "media_player_command.json"));
+        }
+        catch
+        {
+        }
+
+        Add(Path.Combine(AppContext.BaseDirectory, ".calcie", "runtime", "media_player_command.json"));
+        return candidates;
     }
 
     private sealed class PlayerCommandPayload
