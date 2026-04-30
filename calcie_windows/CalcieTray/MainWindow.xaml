@@ -5,12 +5,12 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="CALCIE"
-        Width="388"
-        Height="504"
-        MinWidth="388"
-        MaxWidth="388"
-        MinHeight="504"
-        MaxHeight="504"
+        Width="374"
+        Height="476"
+        MinWidth="374"
+        MaxWidth="374"
+        MinHeight="476"
+        MaxHeight="476"
         WindowStyle="None"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -18,11 +18,11 @@
         AllowsTransparency="True"
         Background="Transparent"
         WindowStartupLocation="Manual">
-    <Border CornerRadius="20"
+    <Border CornerRadius="15"
             Background="#D80B0C0E"
             BorderBrush="#4A444B52"
             BorderThickness="1"
-            Padding="6">
+            Padding="5">
         <Grid>
             <Grid.Background>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
@@ -32,7 +32,7 @@
                 </LinearGradientBrush>
             </Grid.Background>
 
-            <Grid Margin="10">
+            <Grid Margin="8">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
@@ -41,7 +41,7 @@
                 </Grid.RowDefinitions>
 
                 <Grid Grid.Row="0"
-                      Margin="0,0,0,8">
+                      Margin="0,0,0,6">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -51,22 +51,22 @@
                         <TextBlock Text="Ask CALCIE"
                                    Style="{StaticResource PageTitleStyle}" />
                         <TextBlock Text="Follow up, review responses, send normal commands, or use the eye button for a one-time vision check."
-                                   Margin="0,3,8,0"
+                                   Margin="0,2,8,0"
                                    Foreground="{StaticResource TextMutedBrush}"
-                                   FontSize="11.25"
+                                   FontSize="10.25"
                                    FontWeight="SemiBold"
                                    TextWrapping="Wrap" />
                     </StackPanel>
 
                     <StackPanel Grid.Column="1"
                                 HorizontalAlignment="Right">
-                        <Border Padding="10,4"
-                                CornerRadius="13"
+                        <Border Padding="9,3"
+                                CornerRadius="11"
                                 Background="{StaticResource SurfaceAltBrush}"
                                 BorderBrush="{StaticResource BorderBrush}"
                                 BorderThickness="1">
                             <TextBlock Text="{Binding RuntimeState}"
-                                       FontSize="12"
+                                       FontSize="11"
                                        FontWeight="Bold"
                                        Foreground="{StaticResource TextPrimaryBrush}" />
                         </Border>
@@ -84,17 +84,17 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border Style="{StaticResource SectionCardStyle}"
-                                        Margin="0,0,0,8"
-                                        Background="#B416171B"
-                                        Padding="11">
+                                Margin="0,0,0,6"
+                                Background="#B416171B"
+                                        Padding="8">
                                     <StackPanel>
                                         <TextBlock Text="{Binding Speaker}"
                                                    Style="{StaticResource SectionTitleStyle}"
-                                                   Margin="0,0,0,7"
+                                                   Margin="0,0,0,5"
                                                    Foreground="{StaticResource TextMutedBrush}" />
                                         <TextBlock Text="{Binding Body}"
                                                    Style="{StaticResource BodyTextStyle}"
-                                                   FontSize="12.75"
+                                                   FontSize="10.9"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Border>
@@ -104,7 +104,7 @@
                 </ScrollViewer>
 
                 <Grid Grid.Row="2"
-                      Margin="0,10,0,8">
+                      Margin="0,8,0,6">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
@@ -113,20 +113,20 @@
                     </Grid.ColumnDefinitions>
 
                     <Button Grid.Column="0"
-                            Margin="0,0,8,0"
+                            Margin="0,0,6,0"
                             Command="{Binding StartVoiceCommand}"
                             Style="{StaticResource IconButtonStyle}"
                             Content="&#xE720;" />
 
                     <TextBox x:Name="PendingCommandTextBox"
                              Grid.Column="1"
-                             Margin="0,0,8,0"
-                             Padding="10,7"
+                             Margin="0,0,6,0"
+                             Padding="9,5"
                              Background="#9C23252B"
                              BorderBrush="#5A5F636B"
                              BorderThickness="1"
                              Foreground="{StaticResource TextPrimaryBrush}"
-                             FontSize="12.5"
+                             FontSize="11.25"
                              FontWeight="SemiBold"
                              Text="{Binding PendingCommand, UpdateSourceTrigger=PropertyChanged}"
                              TextWrapping="NoWrap"
@@ -137,17 +137,17 @@
                              ToolTip="Press Enter to send." />
 
                     <Button Grid.Column="2"
-                            Margin="0,0,8,0"
+                            Margin="0,0,6,0"
                             Command="{Binding SubmitVisionCommand}"
                             Style="{StaticResource IconButtonStyle}"
                             Content="&#xE8A7;" />
 
                     <Button Grid.Column="3"
-                            Width="38"
-                            Height="38"
+                            Width="34"
+                            Height="34"
                             Command="{Binding SubmitCommand}"
                             Style="{StaticResource PrimaryButtonStyle}"
-                            FontSize="16"
+                            FontSize="14"
                             Content="↑" />
                 </Grid>
 
@@ -157,7 +157,7 @@
                     <Expander.Header>
                         <TextBlock Text="Tools &amp; Status"
                                    Foreground="{StaticResource TextMutedBrush}"
-                                   FontSize="12"
+                                   FontSize="11"
                                    FontWeight="Bold" />
                     </Expander.Header>
 
@@ -165,52 +165,52 @@
                             Style="{StaticResource SectionCardStyle}"
                             Background="#7A111214">
                         <StackPanel>
-                            <WrapPanel Margin="0,0,0,6">
+                            <WrapPanel Margin="0,0,0,4">
                                 <Button Content="Talk"
-                                        Margin="0,0,6,6"
+                                        Margin="0,0,4,4"
                                         Command="{Binding StartVoiceCommand}"
                                         Style="{StaticResource SecondaryButtonStyle}" />
                                 <Button Content="Stop"
-                                        Margin="0,0,6,6"
+                                        Margin="0,0,4,4"
                                         Command="{Binding StopVoiceCommand}"
                                         Style="{StaticResource SecondaryButtonStyle}" />
                                 <Button Content="Settings"
-                                        Margin="0,0,6,6"
+                                        Margin="0,0,4,4"
                                         Command="{Binding OpenSettingsCommand}"
                                         Style="{StaticResource SecondaryButtonStyle}" />
                                 <Button Content="Player"
-                                        Margin="0,0,6,6"
+                                        Margin="0,0,4,4"
                                         Command="{Binding OpenPlayerCommand}"
                                         Style="{StaticResource SecondaryButtonStyle}" />
                                 <Button Content="Refresh"
-                                        Margin="0,0,6,6"
+                                        Margin="0,0,4,4"
                                         Command="{Binding RefreshCommand}"
                                         Style="{StaticResource SecondaryButtonStyle}" />
                                 <Button Content="Restart Runtime"
-                                        Margin="0,0,6,6"
+                                        Margin="0,0,4,4"
                                         Command="{Binding RestartRuntimeCommand}"
                                         Style="{StaticResource SecondaryButtonStyle}" />
                                 <Button Content="Start Vision"
-                                        Margin="0,0,6,6"
+                                        Margin="0,0,4,4"
                                         Command="{Binding StartVisionCommand}"
                                         Style="{StaticResource SecondaryButtonStyle}" />
                                 <Button Content="Stop Vision"
-                                        Margin="0,0,6,6"
+                                        Margin="0,0,4,4"
                                         Command="{Binding StopVisionCommand}"
                                         Style="{StaticResource SecondaryButtonStyle}" />
                             </WrapPanel>
 
                             <TextBlock Text="{Binding RuntimeDetail}"
-                                       Margin="0,0,0,6"
+                                       Margin="0,0,0,4"
                                        Style="{StaticResource BodyTextStyle}" />
                             <TextBlock Text="{Binding UpdateStatusMessage}"
-                                       Margin="0,0,0,6"
+                                       Margin="0,0,0,4"
                                        Foreground="{StaticResource TextMutedBrush}"
-                                       FontSize="12.5"
+                                       FontSize="11"
                                        TextWrapping="Wrap" />
                             <TextBlock Text="{Binding VisionGoal, StringFormat=Vision Goal: {0}}"
                                        Foreground="{StaticResource TextMutedBrush}"
-                                       FontSize="12.5"
+                                       FontSize="11"
                                        TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
