@@ -31,6 +31,7 @@ public partial class PlayerWindow : Window
 
     public async void LoadUrl(string url, string title, string subtitle)
     {
+        ShowPlayer();
         Title = title;
         StateText.Text = "Loading";
         SubtitleText.Text = subtitle;
