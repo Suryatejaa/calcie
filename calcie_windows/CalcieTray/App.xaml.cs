@@ -4,6 +4,7 @@ using System.Windows.Threading;
 using CalcieTray.Services;
 using CalcieTray.ViewModels;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.IO;
 
 namespace CalcieTray;
@@ -251,11 +252,31 @@ public partial class App : System.Windows.Application
 
     private sealed class PlayerCommandPayload
     {
+        [JsonPropertyName("action")]
         public string? Action { get; set; }
+
+        [JsonPropertyName("request_id")]
         public string? RequestId { get; set; }
+
+        [JsonPropertyName("requested_at")]
+        public string? RequestedAt { get; set; }
+
+        [JsonPropertyName("url")]
         public string? Url { get; set; }
+
+        [JsonPropertyName("title")]
         public string? Title { get; set; }
+
+        [JsonPropertyName("subtitle")]
         public string? Subtitle { get; set; }
+
+        [JsonPropertyName("platform")]
+        public string? Platform { get; set; }
+
+        [JsonPropertyName("query")]
+        public string? Query { get; set; }
+
+        [JsonPropertyName("show_player")]
         public bool ShowPlayer { get; set; }
     }
 }
