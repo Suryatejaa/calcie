@@ -13,6 +13,7 @@ public sealed class PlayerWindowController : IDisposable
     public void LoadUrl(string url, string title, string subtitle)
     {
         EnsureWindow();
+        _playerWindow!.ShowPlayer();
         _playerWindow!.LoadUrl(url, title, subtitle);
     }
 
