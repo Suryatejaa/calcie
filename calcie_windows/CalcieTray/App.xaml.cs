@@ -4,6 +4,7 @@ using System.Windows.Threading;
 using CalcieTray.Services;
 using CalcieTray.ViewModels;
 using System.Text.Json;
+using System.IO;
 
 namespace CalcieTray;
 
