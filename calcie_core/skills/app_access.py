@@ -88,6 +88,8 @@ class AppAccessSkill:
         self.project_root = Path(__file__).resolve().parents[2]
         self.shell_status_path = self.project_root / ".calcie" / "runtime" / "macos_shell_status.json"
         self.media_player_command_path = self.project_root / ".calcie" / "runtime" / "media_player_command.json"
+        env_project_root = (os.environ.get("CALCIE_PROJECT_ROOT") or "").strip()
+        self.env_project_root = Path(env_project_root).resolve() if env_project_root else None
         self.desktop_player_enabled = (
             os.environ.get("CALCIE_DESKTOP_PLAYER_ENABLED", "1").strip().lower()
             in {"1", "true", "yes", "on"}
@@ -499,10 +501,13 @@ class AppAccessSkill:
         action, body = parsed
         lowered = body.lower()
 
-        if self._desktop_player_shell_available():
+        player_shell_available = self._desktop_player_shell_available()
+        if player_shell_available:
             player_result = self._handle_play_command_via_calcie_player(action, body)
             if player_result:
                 return player_result
+            if sys.platform == "win32":
+                return "CALCIE Player is available, but Windows could not route this play request into the player yet."
 
         if action in {"skip", "next"}:
             advanced = self._trigger_system_media_command(19)
@@ -695,7 +700,7 @@ class AppAccessSkill:
         return None
 
     def _handle_play_command_via_calcie_player(self, action: str, body: str) -> Optional[str]:
-        if sys.platform != "darwin" or not self.desktop_player_enabled:
+        if sys.platform not in {"darwin", "win32"} or not self.desktop_player_enabled:
             return None
 
         lowered = (body or "").strip().lower()
@@ -812,9 +817,32 @@ class AppAccessSkill:
             return f"Playing {query} in CALCIE Player..."
         return None
 
+    def _desktop_player_command_candidates(self) -> list:
+        candidates = []
+        seen = set()
+
+        def add(path: Path):
+            resolved = Path(path)
+            key = str(resolved)
+            if key in seen:
+                return
+            seen.add(key)
+            candidates.append(resolved)
+
+        add(self.media_player_command_path)
+        if self.env_project_root:
+            add(self.env_project_root / ".calcie" / "runtime" / "media_player_command.json")
+        try:
+            add(Path.cwd().resolve() / ".calcie" / "runtime" / "media_player_command.json")
+        except Exception:
+            pass
+        return candidates
+
     def _desktop_player_shell_available(self) -> bool:
-        if sys.platform != "darwin" or not self.desktop_player_enabled:
+        if sys.platform not in {"darwin", "win32"} or not self.desktop_player_enabled:
             return False
+        if sys.platform == "win32":
+            return True
         try:
             data = json.loads(self.shell_status_path.read_text(encoding="utf-8"))
         except Exception:
@@ -856,15 +884,16 @@ class AppAccessSkill:
             "query": query or "",
             "show_player": bool(show_player),
         }
-        try:
-            self.media_player_command_path.parent.mkdir(parents=True, exist_ok=True)
-            self.media_player_command_path.write_text(
-                json.dumps(payload, ensure_ascii=True),
-                encoding="utf-8",
-            )
-            return True
-        except Exception:
-            return False
+        raw = json.dumps(payload, ensure_ascii=True)
+        wrote_any = False
+        for candidate in self._desktop_player_command_candidates():
+            try:
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                candidate.write_text(raw, encoding="utf-8")
+                wrote_any = True
+            except Exception:
+                continue
+        return wrote_any
 
     def _play_youtube_query_in_app_macos(self, query: str) -> Optional[str]:
         if sys.platform != "darwin":
