@@ -53,11 +53,18 @@
     <section id="download" class="download-panel">
       <div>
         <p class="eyebrow">Download</p>
-        <h2>CALCIE for macOS</h2>
-        <p>Current alpha: <strong>0.1.0 build 1</strong>. Replace the placeholder URL below after uploading the signed DMG.</p>
+        <h2>CALCIE alpha downloads</h2>
+        <p>Current alpha: <strong>0.1.0 build 1</strong>. Download the latest public macOS and Windows tester builds below.</p>
+        <p class="download-note">
+          This is a not-yet-notarized alpha build. If macOS blocks the app after you drag it into Applications, run
+          <code>xattr -dr com.apple.quarantine /Applications/CALCIE.app</code>
+          once in Terminal.
+        </p>
       </div>
       <div class="download-actions">
-        <a class="button primary disabled" aria-disabled="true" href="#">DMG coming soon</a>
+        <a class="button primary" href="https://pub-b83a9a395c1d450887d8e8bf992ee563.r2.dev/CALCIE-0.1.0-1-alpha.dmg">Download DMG</a>
+        <a class="button primary" href="https://pub-b83a9a395c1d450887d8e8bf992ee563.r2.dev/CALCIE-0.1.0-1-alpha-windows.zip">Windows beta ZIP</a>
+        <button class="button secondary copy-command-button" type="button" data-copy="xattr -dr com.apple.quarantine /Applications/CALCIE.app">Copy Install Command</button>
         <a class="button secondary" href="releases/0.1.0.html">Release notes</a>
       </div>
     </section>

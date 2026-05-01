@@ -36,8 +36,14 @@ It runs on laptop (main runtime), supports cross-device sync with Android client
   - website/docs launch flow
   - update notification manifest
   - first-run ChatGPT memory import onboarding
+- Public alpha launch is now live:
+  - website: `https://cacie-official.vercel.app/`
+  - release notes: `https://cacie-official.vercel.app/releases/0.1.0`
+  - macOS alpha DMG: `https://pub-b83a9a395c1d450887d8e8bf992ee563.r2.dev/CALCIE-0.1.0-1-alpha.dmg`
+  - planned Windows beta bundle URL: `https://pub-b83a9a395c1d450887d8e8bf992ee563.r2.dev/CALCIE-0.1.0-1-alpha-windows.zip`
+  - release/update metadata published through `https://calcie.onrender.com/updates/releases`
 - Added **first-run profile import plumbing**:
-  - Advanced Options can copy the ChatGPT memory export prompt
+  - Settings can copy the ChatGPT memory export prompt
   - pasted fenced response imports into local-only `calcie_profile.local.json`
   - raw import backup is stored under `.calcie/profile_imports/`
 - Added **weather-specific handling**:
@@ -54,7 +60,8 @@ It runs on laptop (main runtime), supports cross-device sync with Android client
   - launch-at-login toggle for the packaged app
   - native permission-state checks for microphone/accessibility/screen recording/notifications
   - runtime identity + restart controls for local backend recovery
-  - compact popover + floating `Advanced Options` panel
+  - compact popover + floating `Settings` panel
+  - cleaner public UI with developer tools hidden by default in release builds
   - bundle build/signing diagnostics in the app
   - **CALCIE Player Phase 1**:
     - one app-owned `MediaSessionManager`
@@ -64,6 +71,10 @@ It runs on laptop (main runtime), supports cross-device sync with Android client
     - desktop media controls for `play`, `pause`, `resume`, `next`, `previous`, and `play again`
     - in-player controls for mute, volume, speed, and seek
     - lightweight history plus persisted last-session restore across app restarts
+- Screen capture/memory flow now respects macOS shell permission state before attempting screenshots, which reduces repeated Screen Recording prompts when CALCIE.app is not yet authorized.
+- Added the first Windows planning track:
+  - `CALCIE_WINDOWS_PLAN.md`
+  - Windows tray app direction instead of waiting for full desktop parity
 - Local API access logs are disabled by default to keep CALCIE output clean.
 - Added a stable-signing workflow helper for packaged macOS installs:
   - `./scripts/check_calcie_codesign.sh`
@@ -99,7 +110,40 @@ mobile_v2/                        # Android client v2.1
 job-hunter/                       # Local jobs UI + API handoff app
 calcie_local_api/                 # Local HTTP runtime control API
 calcie_macos/                     # Native macOS menu bar shell
+calcie_windows/                   # Windows tray shell scaffold
+CALCIE_WINDOWS_PLAN.md           # Windows tray-shell architecture and rollout plan
 ```
+
+## Windows Tester Bundle
+
+The Windows shell is no longer just a repo-only dev surface. Use the Windows PowerShell bundle script to create a portable tester package:
+
+```powershell
+.\scripts\build_calcie_windows_bundle.ps1
+```
+
+This produces:
+
+```text
+dist/CALCIE-0.1.0-1-alpha-windows.zip
+```
+
+The bundle includes:
+- `CalcieTray.exe`
+- `backend/CalcieRuntime.exe`
+- a `Launch CALCIE.bat` helper
+- the runtime support files CALCIE still expects on disk during alpha
+
+Build the backend only:
+
+```powershell
+.\scripts\build_calcie_windows_backend.ps1
+```
+
+Important:
+- run these on Windows
+- install `PyInstaller` in the active Python environment first if needed
+- avoid building from OneDrive if possible, or pause sync during build to prevent `obj/project.assets.json` file locks
 
 ---
 
@@ -612,10 +656,11 @@ Current behavior:
 - runtime status + recent events
 - runtime identity + restart action
 - packaged app bundle support
-- compact menu with advanced settings split into a floating panel
+- compact menu with user-facing `Settings` split into a floating panel
 - **hold Right Option** for talk-to-CALCIE
 - launch-at-login toggle for `CALCIE.app`
 - app-owned CALCIE Player surface with one reusable window and one reusable web view
+- developer-only controls are hidden in release builds unless explicitly enabled
 - desktop media commands now prefer CALCIE Player when the shell is active:
   - `play`
   - `pause`
@@ -642,6 +687,15 @@ export CALCIE_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)"
 ./scripts/install_calcie_macos_app.sh
 ```
 
+Current public alpha note:
+- CALCIE is distributed as a hobby alpha and is **not notarized** yet.
+- macOS may flag the downloaded app as damaged even when the DMG itself is fine.
+- Current install workaround after dragging the app into `Applications`:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/CALCIE.app
+```
+
 Installed app path:
 
 ```text
@@ -665,7 +719,7 @@ The first player milestone is intentionally simple and architecture-first:
 - persisted player session under `~/.calcie/runtime/media_session_state.json`
 
 Current status:
-- you can open the player from the mini menu or Advanced Options
+- you can open the player from the mini menu or Settings
 - it uses watch-page loading for YouTube / YouTube Music inside the CALCIE-owned surface
 - desktop media commands can reuse this same surface for:
   - `play <song>`
@@ -687,6 +741,22 @@ Current status:
   - `rewind 15 seconds`
 - after restart, `resume` / `play music` can restore the last known playable session instead of starting empty
 - future queue work should keep extending this same surface instead of opening new tabs
+
+### Current Packaging Reality
+
+CALCIE is currently a hybrid desktop product:
+
+- **Cloud backend**:
+  - `https://calcie.onrender.com`
+  - used for release metadata, update manifest publication, and sync/backend-style endpoints
+- **Local assistant runtime**:
+  - still powers actual assistant behavior on-device
+  - handles skills, voice, vision, player control, automation, and local memory
+- **Packaged macOS shell**:
+  - `CALCIE.app` gives the native menu bar UX
+  - public DMG is live, but the assistant runtime is not yet a fully self-contained consumer bundle independent of the current local runtime assumptions
+
+This is why CALCIE should still be treated as an alpha rather than a fully sealed consumer desktop release.
 
 ---
 
@@ -735,6 +805,15 @@ Rebuild/reinstall the packaged app:
 
 Then quit any stale CALCIE instance before reopening `~/Applications/CALCIE.app`.
 
+### macOS says `CALCIE is damaged and can't be opened`
+For the current unsigned/not-yet-notarized alpha, copy CALCIE into `Applications` and then run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/CALCIE.app
+```
+
+Then reopen CALCIE.
+
 ### Local API request logs are cluttering output
 By default they are now disabled.
 
@@ -777,6 +856,13 @@ Dev/prod release flow:
 
 See `CALCIE_RELEASE_FLOW.md` for the full dev -> QA -> prod process, Render backend production notes, and Vercel website deployment flow.
 
+Current live alpha release endpoints:
+
+- Website: `https://cacie-official.vercel.app/`
+- Release notes: `https://cacie-official.vercel.app/releases/0.1.0`
+- macOS alpha DMG: `https://pub-b83a9a395c1d450887d8e8bf992ee563.r2.dev/CALCIE-0.1.0-1-alpha.dmg`
+- Backend release metadata: `https://calcie.onrender.com/updates/releases`
+
 Build a local macOS DMG:
 
 ```bash
@@ -815,7 +901,22 @@ styles.css
 main.js
 ```
 
-Use this static site for the first public launch page, setup guide, privacy page, and release notes. Replace the placeholder download button after uploading the DMG.
+Use this static site for the public launch page, setup guide, privacy page, and release notes. The live public site is currently deployed at `https://cacie-official.vercel.app/`.
+
+---
+
+## Windows Direction
+
+Windows is the next major platform target because many early testers are Windows-first.
+
+The current plan is:
+- Windows tray app instead of a full desktop-first shell
+- shared Python runtime + shared local HTTP API
+- phased beta instead of waiting for full macOS parity
+- development on Apple Silicon Mac + Windows 11 ARM VM for sanity checks
+- real validation on tester-owned Windows hardware
+
+See [CALCIE_WINDOWS_PLAN.md](/Volumes/D-Drive/Projects/Jarvis/CALCIE_WINDOWS_PLAN.md) for the staged rollout plan.
 
 ---
 

@@ -115,8 +115,20 @@ git push dev HEAD:main
 CALCIE_RELEASE_CHANNEL=alpha ./scripts/build_calcie_dmg.sh release
 ```
 
-6. Upload DMG to the chosen download host.
-7. Publish update manifest:
+6. Build the Windows tester bundle on Windows:
+
+```powershell
+.\scripts\build_calcie_windows_bundle.ps1
+```
+
+This produces:
+
+```text
+dist/CALCIE-0.1.0-1-alpha-windows.zip
+```
+
+7. Upload DMG / Windows ZIP to the chosen download host.
+8. Publish update manifest:
 
 ```bash
 ./scripts/publish_calcie_release.py \
@@ -124,7 +136,7 @@ CALCIE_RELEASE_CHANNEL=alpha ./scripts/build_calcie_dmg.sh release
   --release-notes-url https://calcie-site/releases/0.1.0
 ```
 
-8. After QA, promote to production branch:
+9. After QA, promote to production branch:
 
 ```bash
 ./scripts/promote_calcie_prod.sh --execute

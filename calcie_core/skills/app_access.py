@@ -85,11 +85,11 @@ class AppAccessSkill:
             "youtube music": "com.google.Chrome.app.aeblfdkhhhdcdjpifhhbdiojplfjncoa",
             "youtube": "com.google.Chrome.app.agimnkijcaahngcdmfeangaknmldooml",
         }
-        self.project_root = Path(__file__).resolve().parents[2]
-        self.shell_status_path = self.project_root / ".calcie" / "runtime" / "macos_shell_status.json"
-        self.media_player_command_path = self.project_root / ".calcie" / "runtime" / "media_player_command.json"
         env_project_root = (os.environ.get("CALCIE_PROJECT_ROOT") or "").strip()
         self.env_project_root = Path(env_project_root).resolve() if env_project_root else None
+        self.project_root = self.env_project_root or Path(__file__).resolve().parents[2]
+        self.shell_status_path = self.project_root / ".calcie" / "runtime" / "macos_shell_status.json"
+        self.media_player_command_path = self.project_root / ".calcie" / "runtime" / "media_player_command.json"
         self.desktop_player_enabled = (
             os.environ.get("CALCIE_DESKTOP_PLAYER_ENABLED", "1").strip().lower()
             in {"1", "true", "yes", "on"}

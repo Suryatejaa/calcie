@@ -102,6 +102,37 @@ Current limitation:
   - YouTube / YouTube Music home entry points
   - not yet full runtime-driven media parity
 
+## Windows tester bundle
+
+For a tester-friendly Windows download, use the bundle scripts from a Windows machine:
+
+```powershell
+.\scripts\build_calcie_windows_bundle.ps1
+```
+
+This script:
+- publishes the WPF tray shell as a self-contained `CalcieTray.exe`
+- builds a bundled `backend\CalcieRuntime.exe` with PyInstaller
+- assembles a portable folder
+- zips it to:
+
+```text
+dist/CALCIE-0.1.0-1-alpha-windows.zip
+```
+
+The zip contains `CalcieTray.exe` plus the bundled backend and a `Launch CALCIE.bat` helper.
+
+Backend-only build:
+
+```powershell
+.\scripts\build_calcie_windows_backend.ps1
+```
+
+Notes:
+- install `PyInstaller` into the active Python environment first if needed
+- if your repo lives inside OneDrive, pause syncing before build to avoid `.NET` file locks
+- the public website should link to the Windows zip, not to the raw `CalcieTray.exe`, because the backend ships alongside it
+
 ## Near-term next steps
 
 1. Build and test on Windows 11

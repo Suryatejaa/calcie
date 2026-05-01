@@ -77,6 +77,18 @@ public sealed class RuntimeLauncher : IDisposable
 
     private static IEnumerable<(string FileName, string Arguments, string Display)> LaunchCandidates()
     {
+        var bundledBackend = Path.Combine(AppContext.BaseDirectory, "backend", "CalcieRuntime.exe");
+        if (File.Exists(bundledBackend))
+        {
+            yield return (bundledBackend, string.Empty, "backend\\CalcieRuntime.exe");
+        }
+
+        var localBundledBackend = Path.Combine(AppContext.BaseDirectory, "CalcieRuntime.exe");
+        if (File.Exists(localBundledBackend))
+        {
+            yield return (localBundledBackend, string.Empty, "CalcieRuntime.exe");
+        }
+
         yield return ("py", "-3 -m calcie_local_api.server", "py -3 -m calcie_local_api.server");
         yield return ("python", "-m calcie_local_api.server", "python -m calcie_local_api.server");
         yield return ("python3", "-m calcie_local_api.server", "python3 -m calcie_local_api.server");
