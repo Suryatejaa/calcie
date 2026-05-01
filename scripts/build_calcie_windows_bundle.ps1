@@ -36,14 +36,28 @@ New-Item -ItemType Directory -Force -Path $BundleRoot | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $BundleRoot "backend") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $BundleRoot ".calcie/runtime") | Out-Null
 
+function Copy-OptionalItem {
+  param(
+    [string]$SourcePath,
+    [string]$DestinationPath
+  )
+
+  if (Test-Path $SourcePath) {
+    Copy-Item -Recurse -Force $SourcePath $DestinationPath
+  }
+  else {
+    Write-Host "Skipping optional bundle asset: $SourcePath"
+  }
+}
+
 Copy-Item -Recurse -Force (Join-Path $PublishRoot "*") $BundleRoot
 Copy-Item -Force $BackendExe (Join-Path $BundleRoot "backend/CalcieRuntime.exe")
-Copy-Item -Force (Join-Path $RepoRoot "calcie-logo.png") (Join-Path $BundleRoot "calcie-logo.png")
-Copy-Item -Force (Join-Path $RepoRoot "requirements.txt") (Join-Path $BundleRoot "requirements.txt")
+Copy-OptionalItem (Join-Path $RepoRoot "calcie-logo.png") (Join-Path $BundleRoot "calcie-logo.png")
+Copy-OptionalItem (Join-Path $RepoRoot "requirements.txt") (Join-Path $BundleRoot "requirements.txt")
 Copy-Item -Recurse -Force (Join-Path $RepoRoot "calcie_core") (Join-Path $BundleRoot "calcie_core")
-Copy-Item -Recurse -Force (Join-Path $RepoRoot "job-hunter") (Join-Path $BundleRoot "job-hunter")
+Copy-OptionalItem (Join-Path $RepoRoot "job-hunter") (Join-Path $BundleRoot "job-hunter")
 Copy-Item -Force (Join-Path $RepoRoot "calcie.py") (Join-Path $BundleRoot "calcie.py")
-Copy-Item -Force (Join-Path $RepoRoot "indian-premier-league-2026-1PW.html") (Join-Path $BundleRoot "indian-premier-league-2026-1PW.html")
+Copy-OptionalItem (Join-Path $RepoRoot "indian-premier-league-2026-1PW.html") (Join-Path $BundleRoot "indian-premier-league-2026-1PW.html")
 
 @"
 @echo off
