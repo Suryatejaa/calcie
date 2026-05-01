@@ -14,14 +14,21 @@ public sealed class LocalApiClient
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient _statusClient;
+    private readonly HttpClient _commandClient;
 
     public LocalApiClient(string baseUrl = "http://127.0.0.1:8765")
     {
-        _httpClient = new HttpClient
+        _statusClient = new HttpClient
         {
             BaseAddress = new Uri(baseUrl),
             Timeout = TimeSpan.FromSeconds(8)
+        };
+
+        _commandClient = new HttpClient
+        {
+            BaseAddress = new Uri(baseUrl),
+            Timeout = TimeSpan.FromSeconds(30)
         };
     }
 
@@ -78,7 +85,7 @@ public sealed class LocalApiClient
 
     private async Task<T?> GetAsync<T>(string path, CancellationToken cancellationToken)
     {
-        using var response = await _httpClient.GetAsync(path, cancellationToken);
+        using var response = await _statusClient.GetAsync(path, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken);
@@ -86,7 +93,7 @@ public sealed class LocalApiClient
 
     private async Task<T?> PostAsync<T>(string path, object payload, CancellationToken cancellationToken)
     {
-        using var response = await _httpClient.PostAsJsonAsync(path, payload, JsonOptions, cancellationToken);
+        using var response = await _commandClient.PostAsJsonAsync(path, payload, JsonOptions, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken);

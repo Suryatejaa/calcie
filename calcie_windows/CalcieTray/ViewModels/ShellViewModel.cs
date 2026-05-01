@@ -520,6 +520,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
 
             await RefreshAsync();
         }
+        catch (TaskCanceledException)
+        {
+            RuntimeState = "error";
+            RuntimeDetail = "Command timed out";
+            LastResponse = "This request took too long for the Windows shell. The VM may be slow, the backend may be busy, or the target app may still be opening.";
+            ShowNotificationAction?.Invoke("CALCIE Timeout", LastResponse, ToolTipIcon.Warning);
+        }
         catch (Exception ex)
         {
             RuntimeState = "error";
