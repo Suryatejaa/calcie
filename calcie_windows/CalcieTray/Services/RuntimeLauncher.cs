@@ -77,6 +77,12 @@ public sealed class RuntimeLauncher : IDisposable
 
     private static IEnumerable<(string FileName, string Arguments, string Display)> LaunchCandidates()
     {
+        var internalBundledBackend = Path.Combine(AppContext.BaseDirectory, "app", "backend", "CalcieRuntime.exe");
+        if (File.Exists(internalBundledBackend))
+        {
+            yield return (internalBundledBackend, string.Empty, "app\\backend\\CalcieRuntime.exe");
+        }
+
         var bundledBackend = Path.Combine(AppContext.BaseDirectory, "backend", "CalcieRuntime.exe");
         if (File.Exists(bundledBackend))
         {

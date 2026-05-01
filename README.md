@@ -129,10 +129,10 @@ dist/CALCIE-0.1.0-1-alpha-windows.zip
 ```
 
 The bundle includes:
-- `CalcieTray.exe`
-- `backend/CalcieRuntime.exe`
+- a top-level `CALCIE.exe`
 - a `Launch CALCIE.bat` helper
-- the runtime support files CALCIE still expects on disk during alpha
+- an internal bundled runtime under `app/`
+- the minimum on-disk support files CALCIE still expects during alpha
 
 Build the backend only:
 
