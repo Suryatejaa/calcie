@@ -333,7 +333,8 @@ class Calcie:
         self.google_tts_disabled = False
         self.google_tts_disable_reason = ""
         self.google_tts_disable_logged = False
-        self.project_root = Path.cwd().resolve()
+        env_project_root = (os.environ.get("CALCIE_PROJECT_ROOT") or "").strip()
+        self.project_root = Path(env_project_root).resolve() if env_project_root else Path.cwd().resolve()
         self.runtime_state_lock = threading.Lock()
         self.runtime_state = "starting"
         self.runtime_state_detail = ""
@@ -1216,7 +1217,6 @@ class Calcie:
         if sys.platform == "darwin":
             if pyautogui is None:
                 warnings.append("pyautogui is unavailable. Accessibility-driven control will be limited until pyautogui is installed.")
-            warnings.append("macOS permissions must be granted for Microphone, Accessibility, Screen Recording, and Notifications.")
         return warnings
 
     def get_recent_events(self, limit: int = 20) -> list:
