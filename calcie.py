@@ -81,6 +81,25 @@ from calcie_core.skills import (
 # Load environment variables from .env file
 load_dotenv()
 
+
+def _load_calcie_runtime_env() -> None:
+    project_root_raw = os.environ.get("CALCIE_PROJECT_ROOT")
+    if not project_root_raw:
+        return
+
+    project_root = Path(project_root_raw).expanduser()
+    candidate_envs = [
+        project_root / ".env",
+        project_root.parent / ".env",
+    ]
+
+    for env_path in candidate_envs:
+        if env_path.is_file():
+            load_dotenv(env_path, override=False)
+
+
+_load_calcie_runtime_env()
+
 try:
     from anthropic import Anthropic
     ANTHROPIC_AVAILABLE = True

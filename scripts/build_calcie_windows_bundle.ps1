@@ -75,6 +75,7 @@ function Copy-PublishPayload {
 Copy-PublishPayload -SourceRoot $PublishRoot -DestinationRoot $BundleRoot
 Copy-Item -Force $BackendExe (Join-Path $AppRoot "backend/CalcieRuntime.exe")
 Copy-OptionalItem (Join-Path $RepoRoot "calcie-logo.png") (Join-Path $AppRoot "calcie-logo.png")
+Copy-OptionalItem (Join-Path $RepoRoot ".env.example") (Join-Path $BundleRoot ".env.example")
 Copy-OptionalItem (Join-Path $RepoRoot ".env.example") (Join-Path $AppRoot ".env.example")
 Copy-Item -Recurse -Force (Join-Path $RepoRoot "calcie_core") (Join-Path $AppRoot "calcie_core")
 Copy-Item -Force (Join-Path $RepoRoot "calcie.py") (Join-Path $AppRoot "calcie.py")
@@ -94,6 +95,7 @@ start "" "%~dp0CALCIE.exe"
 This portable tester bundle contains:
 - CALCIE.exe
 - an internal bundled local runtime under `app\backend`
+- a top-level `.env.example` you can copy to `.env`
 
 Run `Launch CALCIE.bat`.
 
