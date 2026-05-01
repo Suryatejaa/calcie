@@ -10,19 +10,53 @@
   <header class="site-header"><a class="brand" href="../index.html"><span class="brand-mark">C</span><span>CALCIE</span></a></header>
   <main class="doc-page">
     <p class="eyebrow">Setup</p>
-    <h1>Install CALCIE for macOS</h1>
-    <ol class="steps">
-      <li>Download the signed DMG from the release page.</li>
-      <li>Drag <strong>CALCIE.app</strong> into Applications.</li>
-      <li>Open CALCIE from Applications, not from the build folder.</li>
-      <li>Grant Microphone, Accessibility, Screen Recording, and Notifications when prompted.</li>
-      <li>Use Advanced Options to import ChatGPT memory if you want continuity.</li>
-    </ol>
+    <h1>Install CALCIE</h1>
+
+    <section class="doc-card">
+      <h2>macOS alpha</h2>
+      <ol class="steps">
+        <li>Download the CALCIE alpha DMG from the release page.</li>
+        <li>Drag <strong>CALCIE.app</strong> into Applications.</li>
+        <li>If macOS says CALCIE is damaged, open Terminal and run <code>xattr -dr com.apple.quarantine /Applications/CALCIE.app</code>.</li>
+        <li>Open CALCIE from Applications, not from the build folder.</li>
+        <li>Grant Microphone, Accessibility, Screen Recording, and Notifications when prompted.</li>
+        <li>Use Settings to import ChatGPT memory if you want continuity.</li>
+      </ol>
+    </section>
+
+    <section class="doc-card">
+      <h2>Windows beta</h2>
+      <ol class="steps">
+        <li>Download the Windows beta ZIP from the release page.</li>
+        <li>Extract the ZIP somewhere outside OneDrive if possible. Example: <code>C:\CALCIE</code>.</li>
+        <li>Run <code>Launch CALCIE.bat</code> or <code>CalcieTray.exe</code>.</li>
+        <li>If SmartScreen warns about the app, choose <strong>More info</strong> then <strong>Run anyway</strong> for this alpha tester build.</li>
+        <li>If you want full LLM-backed answers, copy <code>.env.example</code> to <code>.env</code> and add your API keys.</li>
+      </ol>
+      <p>The Windows beta ZIP includes the tray app and bundled backend together. Your testers should not need to clone the repo.</p>
+    </section>
+
+    <section class="doc-card">
+      <h2>Important alpha note</h2>
+      <p>CALCIE 0.1.0 is an unsigned / not-yet-notarized macOS alpha. Some Macs will block the first launch after download. If that happens, copy CALCIE into Applications first, then run the command below once:</p>
+      <pre><code>xattr -dr com.apple.quarantine /Applications/CALCIE.app</code></pre>
+      <p>After that, open CALCIE from Applications.</p>
+    </section>
 
     <section class="doc-card">
       <h2>First-run memory import</h2>
       <p>CALCIE can start empty. If you want it to remember context from ChatGPT, copy the prompt inside Advanced Options, paste it into ChatGPT, then paste the fenced response back into CALCIE.</p>
       <p>The import stays local by default in <code>calcie_profile.local.json</code> and <code>.calcie/profile_imports/</code>.</p>
+    </section>
+
+    <section class="doc-card">
+      <h2>API keys</h2>
+      <p>Without provider keys, CALCIE still handles some deterministic tasks, but richer chat/search/media flows may be limited. The easiest path is:</p>
+      <ol class="steps">
+        <li>Copy <code>.env.example</code> to <code>.env</code>.</li>
+        <li>Add at least a valid <code>GEMINI_API_KEY</code>.</li>
+        <li>Restart CALCIE after editing the file.</li>
+      </ol>
     </section>
 
     <section class="doc-card">
