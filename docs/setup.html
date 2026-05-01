@@ -31,9 +31,9 @@
         <li>Extract the ZIP somewhere outside OneDrive if possible. Example: <code>C:\CALCIE</code>.</li>
         <li>Run <code>Launch CALCIE.bat</code>. The internal app/runtime folder is bundled for CALCIE itself; testers should not launch files inside it directly.</li>
         <li>If SmartScreen warns about the app, choose <strong>More info</strong> then <strong>Run anyway</strong> for this alpha tester build.</li>
-        <li>If you want full LLM-backed answers, copy <code>.env.example</code> to <code>.env</code> and add your API keys.</li>
+        <li>If you want full LLM-backed answers, copy the top-level <code>.env.example</code> next to <code>Launch CALCIE.bat</code> to <code>.env</code> and add your API keys.</li>
       </ol>
-      <p>The Windows beta ZIP includes the tray app and bundled backend together. Your testers should not need to clone the repo.</p>
+      <p>The Windows beta ZIP includes the tray app and bundled local runtime together. Your testers should not need to clone the repo or open a Terminal first.</p>
     </section>
 
     <section class="doc-card">
@@ -51,12 +51,19 @@
 
     <section class="doc-card">
       <h2>API keys</h2>
-      <p>Without provider keys, CALCIE still handles some deterministic tasks, but richer chat/search/media flows may be limited. The easiest path is:</p>
+      <p>You can still test some deterministic/local features without your own provider key, but richer chat, search, and reasoning flows work much better with a Gemini key.</p>
       <ol class="steps">
-        <li>Copy <code>.env.example</code> to <code>.env</code>.</li>
-        <li>Add at least a valid <code>GEMINI_API_KEY</code>.</li>
+        <li>On Windows, copy the top-level <code>.env.example</code> next to <code>Launch CALCIE.bat</code> to <code>.env</code>. On macOS alpha, use the same file in your CALCIE runtime/project root.</li>
+        <li>Open <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>.</li>
+        <li>Sign in with your Google account.</li>
+        <li>Create a free Gemini API key.</li>
+        <li>Open the new <code>.env</code> file in a text editor.</li>
+        <li>Paste your key like this: <code>GEMINI_API_KEY=your_key_here</code>.</li>
+        <li>Save the file.</li>
         <li>Restart CALCIE after editing the file.</li>
       </ol>
+      <p><strong>Good default for testers:</strong> add only <code>GEMINI_API_KEY</code> first. You can ignore the other optional keys unless you specifically want those providers.</p>
+      <p><strong>Current architecture note:</strong> both the macOS alpha and Windows beta still run a local CALCIE runtime on your machine for app control, player control, hotkeys, voice, and screen features. Render is currently used for cloud-side services like updates, not as a replacement for that local runtime.</p>
     </section>
 
     <section class="doc-card">

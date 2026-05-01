@@ -15,6 +15,22 @@ It runs on laptop (main runtime), supports cross-device sync with Android client
 
 ---
 
+## Current State
+
+CALCIE is currently a local-first alpha for testers, builders, and power users.
+
+What that means right now:
+- it is more hackable than polished
+- a local runtime still runs on the user's own machine for app control, hotkeys, player control, screen vision, and OS automation
+- the Render backend is used for cloud-side services like update metadata, not as a replacement for local device control
+- neither the macOS DMG nor the Windows ZIP is a pure cloud thin-client yet; both still rely on that local runtime
+- some deterministic/local flows work without user API keys
+- richer AI chat/search/reasoning flows currently work best when the tester adds their own free Gemini API key
+- Windows is a beta portable bundle, not yet a polished installer
+- macOS is further ahead than Windows in overall product maturity
+
+---
+
 ## What Is New (Latest)
 
 - Added **router + orchestration layer** with typo-tolerant command arbitration (`serch`, `controll`, `cod` style inputs).
