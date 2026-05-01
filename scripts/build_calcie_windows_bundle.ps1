@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 $DistRoot = Join-Path $RepoRoot "dist"
 $PublishRoot = Join-Path $DistRoot "windows-publish"
 $BundleRoot = Join-Path $DistRoot ("CALCIE-Windows-{0}-{1}-{2}" -f $Version, $Build, $Channel)
+$AppRoot = Join-Path $BundleRoot "app"
 $BackendExe = Join-Path $DistRoot "windows-backend/dist/CalcieRuntime.exe"
 $ZipPath = Join-Path $DistRoot ("CALCIE-{0}-{1}-{2}-windows.zip" -f $Version, $Build, $Channel)
 $Project = Join-Path $RepoRoot "calcie_windows/CalcieTray/CalcieTray.csproj"
@@ -33,8 +34,9 @@ if (Test-Path $BundleRoot) {
   Remove-Item -Recurse -Force $BundleRoot
 }
 New-Item -ItemType Directory -Force -Path $BundleRoot | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $BundleRoot "backend") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $BundleRoot ".calcie/runtime") | Out-Null
+New-Item -ItemType Directory -Force -Path $AppRoot | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $AppRoot "backend") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $AppRoot ".calcie/runtime") | Out-Null
 
 function Copy-OptionalItem {
   param(
@@ -50,32 +52,52 @@ function Copy-OptionalItem {
   }
 }
 
-Copy-Item -Recurse -Force (Join-Path $PublishRoot "*") $BundleRoot
-Copy-Item -Force $BackendExe (Join-Path $BundleRoot "backend/CalcieRuntime.exe")
-Copy-OptionalItem (Join-Path $RepoRoot "calcie-logo.png") (Join-Path $BundleRoot "calcie-logo.png")
-Copy-OptionalItem (Join-Path $RepoRoot "requirements.txt") (Join-Path $BundleRoot "requirements.txt")
-Copy-Item -Recurse -Force (Join-Path $RepoRoot "calcie_core") (Join-Path $BundleRoot "calcie_core")
-Copy-OptionalItem (Join-Path $RepoRoot "job-hunter") (Join-Path $BundleRoot "job-hunter")
-Copy-Item -Force (Join-Path $RepoRoot "calcie.py") (Join-Path $BundleRoot "calcie.py")
-Copy-OptionalItem (Join-Path $RepoRoot "indian-premier-league-2026-1PW.html") (Join-Path $BundleRoot "indian-premier-league-2026-1PW.html")
+function Copy-PublishPayload {
+  param(
+    [string]$SourceRoot,
+    [string]$DestinationRoot
+  )
+
+  $allowedFiles = @(
+    "CalcieTray.exe",
+    "WebView2Loader.dll"
+  )
+
+  foreach ($fileName in $allowedFiles) {
+    $sourcePath = Join-Path $SourceRoot $fileName
+    if (Test-Path $sourcePath) {
+      $targetName = if ($fileName -eq "CalcieTray.exe") { "CALCIE.exe" } else { $fileName }
+      Copy-Item -Force $sourcePath (Join-Path $DestinationRoot $targetName)
+    }
+  }
+}
+
+Copy-PublishPayload -SourceRoot $PublishRoot -DestinationRoot $BundleRoot
+Copy-Item -Force $BackendExe (Join-Path $AppRoot "backend/CalcieRuntime.exe")
+Copy-OptionalItem (Join-Path $RepoRoot "calcie-logo.png") (Join-Path $AppRoot "calcie-logo.png")
+Copy-OptionalItem (Join-Path $RepoRoot ".env.example") (Join-Path $AppRoot ".env.example")
+Copy-Item -Recurse -Force (Join-Path $RepoRoot "calcie_core") (Join-Path $AppRoot "calcie_core")
+Copy-Item -Force (Join-Path $RepoRoot "calcie.py") (Join-Path $AppRoot "calcie.py")
+Copy-OptionalItem (Join-Path $RepoRoot "indian-premier-league-2026-1PW.html") (Join-Path $AppRoot "indian-premier-league-2026-1PW.html")
 
 @"
 @echo off
 setlocal
 cd /d %~dp0
-set CALCIE_PROJECT_ROOT=%~dp0
-start "" "%~dp0CalcieTray.exe"
+set CALCIE_PROJECT_ROOT=%~dp0app
+start "" "%~dp0CALCIE.exe"
 "@ | Set-Content -Encoding ASCII (Join-Path $BundleRoot "Launch CALCIE.bat")
 
 @"
 # CALCIE Windows Beta
 
 This portable tester bundle contains:
-- CalcieTray.exe
-- a bundled CalcieRuntime.exe backend
+- CALCIE.exe
+- an internal bundled local runtime under `app\backend`
 
-Run `Launch CALCIE.bat` or `CalcieTray.exe`.
+Run `Launch CALCIE.bat`.
 
+If SmartScreen warns, choose More info -> Run anyway for this beta build.
 If OneDrive, antivirus, or SmartScreen slows first launch, wait a little longer on the first run.
 "@ | Set-Content -Encoding UTF8 (Join-Path $BundleRoot "README.txt")
 
