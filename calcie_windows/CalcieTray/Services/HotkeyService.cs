@@ -5,30 +5,35 @@ namespace CalcieTray.Services;
 
 public sealed class HotkeyService : IDisposable
 {
-    private const int HotkeyId = 0xC411;
+    private const int HotkeyIdTogglePrimary = 0xC411;
+    private const int HotkeyIdToggleSecondary = 0xC412;
     private const int WmHotkey = 0x0312;
     private const int WhKeyboardLl = 13;
     private const int WmKeyDown = 0x0100;
     private const int WmKeyUp = 0x0101;
     private const int WmSysKeyDown = 0x0104;
     private const int WmSysKeyUp = 0x0105;
+    private const uint ModNone = 0x0000;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
     private const uint VkSpace = 0x20;
     private const uint VkRControl = 0xA3;
+    private const uint VkRMenu = 0xA5;
+    private const uint VkF8 = 0x77;
 
     private HwndSource? _source;
     private bool _registered;
     private IntPtr _keyboardHook = IntPtr.Zero;
     private HookProc? _keyboardProc;
     private bool _rightControlDown;
+    private bool _rightAltDown;
 
     public event EventHandler? HotkeyPressed;
     public event EventHandler? PressStarted;
     public event EventHandler? PressEnded;
 
-    public string Description => "Hold Right Ctrl";
-    public string FallbackDescription => "Ctrl+Shift+Space";
+    public string Description => "Hold Right Ctrl or Right Alt";
+    public string FallbackDescription => "F8 or Ctrl+Shift+Space";
 
     public bool Register()
     {
@@ -47,7 +52,9 @@ public sealed class HotkeyService : IDisposable
         _source = new HwndSource(parameters);
         _source.AddHook(WndProc);
 
-        _registered = RegisterHotKey(_source.Handle, HotkeyId, ModControl | ModShift, VkSpace);
+        var primaryRegistered = RegisterHotKey(_source.Handle, HotkeyIdTogglePrimary, ModControl | ModShift, VkSpace);
+        var secondaryRegistered = RegisterHotKey(_source.Handle, HotkeyIdToggleSecondary, ModNone, VkF8);
+        _registered = primaryRegistered || secondaryRegistered;
 
         _keyboardProc = KeyboardProc;
         _keyboardHook = SetWindowsHookEx(WhKeyboardLl, _keyboardProc, GetModuleHandle(null), 0);
@@ -63,13 +70,15 @@ public sealed class HotkeyService : IDisposable
             _keyboardHook = IntPtr.Zero;
             _keyboardProc = null;
             _rightControlDown = false;
+            _rightAltDown = false;
         }
 
         if (_source is not null)
         {
             if (_registered)
             {
-                UnregisterHotKey(_source.Handle, HotkeyId);
+                UnregisterHotKey(_source.Handle, HotkeyIdTogglePrimary);
+                UnregisterHotKey(_source.Handle, HotkeyIdToggleSecondary);
             }
 
             _source.RemoveHook(WndProc);
@@ -82,7 +91,7 @@ public sealed class HotkeyService : IDisposable
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == WmHotkey && wParam.ToInt32() == HotkeyId)
+        if (msg == WmHotkey && (wParam.ToInt32() == HotkeyIdTogglePrimary || wParam.ToInt32() == HotkeyIdToggleSecondary))
         {
             handled = true;
             HotkeyPressed?.Invoke(this, EventArgs.Empty);
@@ -107,6 +116,19 @@ public sealed class HotkeyService : IDisposable
                 else if ((message == WmKeyUp || message == WmSysKeyUp) && _rightControlDown)
                 {
                     _rightControlDown = false;
+                    PressEnded?.Invoke(this, EventArgs.Empty);
+                }
+            }
+            else if (hookStruct.vkCode == VkRMenu)
+            {
+                if ((message == WmKeyDown || message == WmSysKeyDown) && !_rightAltDown)
+                {
+                    _rightAltDown = true;
+                    PressStarted?.Invoke(this, EventArgs.Empty);
+                }
+                else if ((message == WmKeyUp || message == WmSysKeyUp) && _rightAltDown)
+                {
+                    _rightAltDown = false;
                     PressEnded?.Invoke(this, EventArgs.Empty);
                 }
             }
