@@ -1,206 +1,288 @@
+**CALCIE current product state**
 
-**The commercial CALCIE stack:**
+CALCIE is now in a real public **macOS alpha** state, not just a plan.
 
-```
-User installs CALCIE.app (mac) / CALCIE.exe (windows)
-          ↓
-On first launch → Setup wizard
-          ↓
-┌─────────────────────────────────┐
-│  Choose your AI mode:           │
-│  ○ Cloud (recommended)          │
-│    - Fast, always updated       │
-│    - Needs internet             │
-│    - Free tier + paid plans     │
-│                                 │
-│  ○ Offline (optional)           │
-│    - Private, no internet       │
-│    - Needs Ollama installed     │
-│    - CALCIE will guide you      │
-└─────────────────────────────────┘
-```
+Current live surfaces:
+
+- Website: `https://cacie-official.vercel.app/`
+- Release notes: `https://cacie-official.vercel.app/releases/0.1.0`
+- Public macOS alpha DMG: `https://pub-b83a9a395c1d450887d8e8bf992ee563.r2.dev/CALCIE-0.1.0-1-alpha.dmg`
+- Cloud release metadata endpoint: `https://calcie.onrender.com/updates/releases`
+
+That means CALCIE has crossed from prototype into testable product territory, even though it is still early and rough in a few important places.
 
 ---
 
-**Offline onboarding flow CALCIE handles automatically:**
-
-```
-User selects offline mode
-        ↓
-CALCIE checks: is Ollama installed?
-        ↓ No
-"Let me help you set that up"
-CALCIE opens: https://ollama.com/download
-        ↓
-CALCIE polls until Ollama is detected on :11434
-        ↓
-"Great, Ollama is running. Now downloading
- the AI model (4GB, one time only)..."
-CALCIE runs: ollama pull llama3.2
-        ↓
-Progress bar in CALCIE UI
-        ↓
-"You're all set. CALCIE is now fully offline."
-```
-
-This is exactly what apps like LM Studio, Jan, and Msty do. Users don't need to touch a terminal.
-
----
-
-**Commercial tier structure this enables:**
-
-| Plan | LLM | Search | Price |
-|---|---|---|---|
-| Free | Offline Ollama only | Limited | $0 |
-| Pro | Gemini/Claude/GPT-4 | Full | $8-12/month |
-| Teams | All providers + shared memory | Full + collab | $20+/month |
-
-The offline tier is your **free acquisition channel** — zero cloud cost for you, full privacy for them. Users who want faster/smarter responses upgrade to Pro.
-
----
-
-**What this means for your backend:**
-
-```
-Free/Offline users  →  No backend calls at all
-                        CALCIE runs 100% local
-                        Zero cost to you
-
-Pro users           →  calcie_cloud/server.py
-                        LLM API calls (you pay wholesale, charge retail)
-                        Sync across devices
-```
-
-Render free tier handles the sync backend for Pro users fine at small scale. When you grow, move to a $7/month VPS — not a GPU instance, just a basic compute node.
-
----
-
-**The Ollama model recommendation for users:**
-
-| Use case | Model | Size | Why |
-|---|---|---|---|
-| Default offline | `llama3.2:3b` | 2GB | Fast, works on 8GB RAM |
-| Better quality | `llama3.2` | 4GB | Good balance |
-| Best offline | `gemma4:e2b` | ~3GB | Best reasoning at this size |
-| Low end devices | `phi3:mini` | 2.3GB | Works on 4GB RAM |
-
-CALCIE auto-detects RAM and recommends the right model during setup.
-
----
-
-**Deployment order now:**
-
-We should ship in this order instead of trying to launch everything at once:
-
-### Phase 1: backend first
-
-Ship `calcie_cloud/server.py` as the first stable public service.
-
-Purpose:
-- account/session layer for Pro users
-- sync across devices
-- usage/auth foundation for later billing
-- stable API base before public downloads
-
-Recommended first host:
-- Render or Railway for the first public version
-- move to a small VPS later if usage grows
-
-Exit criteria:
-- health check + uptime monitoring
-- production env vars
-- auth/account model decided
-- logs + error reporting
-- stable public base URL
-
-### Phase 2: signed macOS app + DMG
-
-After backend is stable, ship the macOS installer path:
-
-- `CALCIE.app`
-- signed build
-- DMG installer
-
-The DMG should include:
-- CALCIE.app
-- Applications shortcut
-- short install instructions
-
-Exit criteria:
-- stable signing identity
-- packaged app launches without Xcode/Terminal
-- permissions/onboarding are acceptable
-- DMG install flow is clean enough for non-technical users
-
-### Phase 3: official website + docs
-
-Once backend and DMG are stable, publish the public web layer:
-
-- landing page
-- download page for macOS
-- docs
-- pricing / free-vs-pro explanation
-- offline-vs-cloud onboarding explanation
-
-Website sections should be minimal first:
-- Home
-- Download
-- Docs
-- Pricing
-- Privacy
-
-Docs should cover:
-- install CALCIE on macOS
-- permissions
-- offline Ollama setup
-- cloud mode setup
-- common troubleshooting
-
-### Phase 4: Windows `.exe` later
-
-Windows should stay deliberately later.
-
-Reason:
-- packaging
-- code signing
-- audio/hotkey/system-permission behavior
-- installer support burden
-
-Do not block the public macOS launch on Windows.
-
----
-
-**Recommended shipping sequence:**
+**What CALCIE is right now**
 
 ```text
-1. Deploy backend
-2. Package signed CALCIE.app
-3. Build DMG
-4. Launch official website
-5. Publish docs
-6. Ship Windows .exe later
+User downloads CALCIE alpha DMG
+          ↓
+Installs CALCIE.app into Applications
+          ↓
+If macOS blocks launch, user runs quarantine workaround
+          ↓
+CALCIE opens as a native macOS menu bar app
+          ↓
+Local CALCIE runtime handles:
+  - chat
+  - voice
+  - vision
+  - player
+  - automation
+          ↓
+Cloud backend supports:
+  - release metadata
+  - update plumbing
+  - backend/sync-style endpoints
+```
+
+So CALCIE is currently a **hybrid product**:
+
+- **native macOS shell**
+- **local assistant runtime**
+- **cloud backend for release/update infrastructure**
+
+It is not yet a fully sealed consumer desktop app with everything embedded and notarized.
+
+---
+
+**What is already working**
+
+- native macOS menu bar shell
+- typed command input
+- voice push-to-talk using **hold Right Option**
+- permissions checklist in the app
+- launch-at-login
+- CALCIE Player owned by the shell
+- local HTTP control API between shell and runtime
+- release website + setup docs + release notes
+- public DMG hosting
+- backend release manifest publishing
+- first-run ChatGPT memory import path
+
+This is enough for:
+- alpha testers
+- personal daily use
+- early product feedback
+
+---
+
+**What is still alpha**
+
+- macOS install trust flow is still rough
+- the app is **not notarized**
+- some users may see:
+  - `CALCIE is damaged and can't be opened`
+- current workaround after moving CALCIE into `Applications`:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/CALCIE.app
+```
+
+- the local runtime is still closer to a repo-backed alpha runtime than a fully bundled consumer runtime
+- Windows is still planned, not shipped
+- offline local-model mode is still a product direction, not a finished launch feature
+
+So the honest framing is:
+
+**CALCIE is publicly downloadable, but still a hobby alpha rather than a polished mass-market desktop release.**
+
+---
+
+**Current architecture**
+
+```text
+macOS shell                -> calcie_macos/
+local runtime              -> calcie.py + calcie_core/
+local control API          -> calcie_local_api/
+cloud backend              -> calcie_cloud/server.py
+launch site/docs           -> static site on Vercel
+download hosting           -> Cloudflare R2 public URL
+```
+
+In plain language:
+
+- the **brain that actually does work** is still local
+- the **menu bar experience** is native macOS
+- the **cloud backend** helps with release/update plumbing and future sync/account paths
+
+This is why backend deployment is done, but the DMG does **not** yet mean CALCIE is fully cloud-powered or fully self-contained.
+
+---
+
+**Current backend reality**
+
+Backend is deployed.
+
+Current live backend:
+- `https://calcie.onrender.com`
+
+What it is currently good for:
+- release/update metadata
+- sync/account foundation
+- future paid/cloud mode plumbing
+
+What it is **not** yet replacing:
+- the local assistant runtime
+- local voice/vision/control/player execution
+
+So CALCIE is not “backend packed into the DMG.”
+It is:
+- **cloud-assisted**
+- but still **local-runtime-first**
+
+---
+
+**Current macOS product reality**
+
+CALCIE on macOS is now:
+
+- a native menu bar app
+- a floating `Settings` panel, not developer-style `Advanced Options`
+- a reusable owned player surface
+- a more user-facing shell with developer tools hidden by default in release builds
+
+That means the product direction is now much clearer:
+
+- users interact with CALCIE as an app
+- terminal stays a developer surface
+- local runtime continues doing the heavy lifting underneath
+
+---
+
+**Windows direction**
+
+Windows is now important because many real testers are Windows-first.
+
+We should not wait for perfect parity before supporting them.
+
+The right Windows equivalent of the macOS menu bar shell is:
+
+- **Windows system tray app**
+
+not a giant desktop-first window.
+
+That means the long-term product shape becomes:
+
+```text
+macOS   -> native menu bar app
+Windows -> native tray app
+Shared  -> Python runtime + local HTTP API + common product logic
+```
+
+The Windows rollout plan lives in:
+- `CALCIE_WINDOWS_PLAN.md`
+
+Recommended Windows posture:
+- ship a **Windows beta**
+- narrower scope than macOS at first
+- use shared backend/runtime contract
+- bring both platforms onto the same release rhythm later
+
+---
+
+**Offline / local model direction**
+
+Offline mode still matters, but it should be treated as a staged product track, not something to block launch on.
+
+The strongest future direction is:
+
+- small local model for baseline reasoning
+- structured memory/profile retrieval
+- optional cloud upgrade for stronger/faster responses
+
+This means CALCIE’s “brain” should eventually be:
+
+```text
+local symbolic memory
+        +
+local small model
+        +
+optional cloud model
+```
+
+not “LLM only” and not “cloud only.”
+
+That is the right long-term product shape, but it is still ahead of the current alpha.
+
+---
+
+**What “production enough” means now**
+
+For CALCIE, “production enough” should no longer mean “perfect.”
+It should mean:
+
+- public website is live
+- users can actually download the app
+- setup docs are honest
+- runtime/app relationship is understandable
+- permissions flow is acceptable
+- update metadata exists
+- alpha testers can succeed without hand-holding every single step
+
+By that standard, CALCIE is **launchable as an alpha**.
+
+It is **not yet production-polished** for mainstream public distribution because:
+
+- no Apple notarization
+- no fully bundled local runtime
+- Windows not shipped yet
+
+---
+
+**Near-term priorities now**
+
+The right next priorities are:
+
+1. **alpha hardening**
+   - fix rough onboarding edges
+   - reduce remaining permission confusion
+   - improve self-memory/profile responses
+
+2. **Windows tray beta**
+   - get Windows testers onto a real build
+   - keep shared runtime/backend contract
+
+3. **brain upgrade**
+   - stronger local memory retrieval
+   - persistent learned aliases/preferences
+   - eventually optional offline local model
+
+4. **better packaging later**
+   - notarization when budget allows
+   - more self-contained desktop distribution
+
+---
+
+**Recommended shipping sequence from here**
+
+```text
+1. Stabilize macOS alpha
+2. Ship Windows tray beta
+3. Improve local memory / "brain" quality
+4. Make packaging more consumer-grade
+5. Later add notarization and tighter offline model story
 ```
 
 ---
 
-**What “production ready enough” means before public launch:**
+**Bottom line**
 
-- backend has a stable URL
-- macOS app installs from DMG
-- permissions are understandable
-- update path is defined
-- website explains offline vs cloud clearly
-- docs answer setup questions without needing us directly
+CALCIE is no longer just an internal build.
 
----
+It is now:
 
-**Near-term focus:**
+- a live alpha product
+- macOS-first
+- local-runtime-first
+- cloud-assisted
+- Windows-next
 
-The music player is already good enough for now.
+The product question has shifted from:
 
-So the next product work should move away from feature depth and into:
-- backend deployment
-- macOS packaging/distribution
-- website
-- docs
-- launch readiness
+- “Can we launch?”
+
+to:
+
+- “How do we harden the alpha, support Windows testers, and make CALCIE feel more like it truly has its own brain?”

@@ -60,6 +60,7 @@ private struct ShellRuntimeSnapshot: Encodable {
     let bundle_path: String
     let repo_root: String
     let runtime_online: Bool
+    let screen_recording_granted: Bool
     let updated_at: String
 }
 
@@ -70,6 +71,7 @@ private struct AppBundleRuntimeConfig: Decodable {
     let code_signing_identity: String?
     let built_at: String?
     let repo_backed: Bool?
+    let show_developer_tools: Bool?
     let cloud_base_url: String?
     let release_channel: String?
 }
@@ -159,6 +161,15 @@ final class ShellViewModel: ObservableObject {
     var dismissPanelHandler: (() -> Void)?
     var openAdvancedOptionsHandler: (() -> Void)?
     var mediaPlayerCommandHandler: ((MediaPlayerCommandRequest) -> Void)?
+
+    var developerToolsAvailable: Bool {
+        if let explicit = appBundleConfig?.show_developer_tools {
+            return explicit
+        }
+        let normalizedRoot = Self.normalizePath(repoRoot)
+        let rootURL = URL(fileURLWithPath: normalizedRoot)
+        return FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("calcie.py").path)
+    }
 
     init() {
         self.appBundleConfig = Self.loadAppBundleConfig()
@@ -984,11 +995,13 @@ final class ShellViewModel: ObservableObject {
     }
 
     private func writeShellRuntimeStatus() {
+        let screenRecordingGranted = nativePermissions.first(where: { $0.name == "Screen Recording" })?.granted ?? false
         let snapshot = ShellRuntimeSnapshot(
             player_supported: true,
             bundle_path: bundlePath,
             repo_root: repoRoot,
             runtime_online: runtimeOnline,
+            screen_recording_granted: screenRecordingGranted,
             updated_at: ISO8601DateFormatter().string(from: Date())
         )
         do {

@@ -51,6 +51,7 @@ class ScreenVisionSkill:
         self.capture_dir = self.vision_dir / "captures"
         self.events_path = self.vision_dir / "events.jsonl"
         self.shell_window_state_path = self.project_root / ".calcie" / "runtime" / "macos_shell_window.json"
+        self.shell_status_path = self.project_root / ".calcie" / "runtime" / "macos_shell_status.json"
         self.shell_control_request_path = self.project_root / ".calcie" / "runtime" / "macos_shell_control.json"
         self.vision_dir.mkdir(parents=True, exist_ok=True)
         self.capture_dir.mkdir(parents=True, exist_ok=True)
@@ -66,6 +67,7 @@ class ScreenVisionSkill:
         self._last_result: Optional[Dict] = None
         self._events: List[Dict] = []
         self._last_alert_at = 0.0
+        self._capture_backoff_until = 0.0
         self._start_memory_background_loop_if_enabled()
 
     def handle_command(self, user_input: str) -> Tuple[Optional[str], Optional[str]]:
@@ -405,6 +407,11 @@ class ScreenVisionSkill:
         return memory_result
 
     def _capture_screenshot(self, label: str) -> Tuple[bool, Optional[Path], str]:
+        if time.time() < self._capture_backoff_until:
+            wait_s = max(1, int(self._capture_backoff_until - time.time()))
+            return False, None, f"Screen capture cooling down after a recent failure. Try again in about {wait_s}s."
+        if not self._shell_allows_screen_capture():
+            return False, None, "Screen Recording permission is not active for CALCIE.app yet."
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_label = re.sub(r"[^a-zA-Z0-9_-]+", "_", label).strip("_") or "monitor"
         out_path = self.capture_dir / f"{stamp}_{safe_label}.png"
@@ -418,10 +425,42 @@ class ScreenVisionSkill:
                 proc = subprocess.run(["screencapture", "-x", str(out_path)], capture_output=True, text=True)
                 if proc.returncode == 0:
                     return True, out_path, ""
+                self._apply_capture_failure_backoff()
                 return False, None, (proc.stderr or proc.stdout or "screencapture failed").strip()
             return False, None, "No screenshot backend available. Install pyautogui + pillow."
         except Exception as exc:
+            self._apply_capture_failure_backoff()
             return False, None, str(exc)
+
+    def _shell_allows_screen_capture(self) -> bool:
+        if sys.platform != "darwin":
+            return True
+        payload = self._load_shell_status()
+        if not payload:
+            return True
+        return bool(payload.get("screen_recording_granted", False))
+
+    def _load_shell_status(self) -> Optional[Dict]:
+        if sys.platform != "darwin" or not self.shell_status_path.exists():
+            return None
+        try:
+            payload = json.loads(self.shell_status_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        updated_at = payload.get("updated_at")
+        if not updated_at:
+            return None
+        try:
+            updated_dt = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+        except Exception:
+            return None
+        age_s = abs((datetime.now(updated_dt.tzinfo) - updated_dt).total_seconds())
+        if age_s > max(self.shell_state_max_age_s * 4, 10):
+            return None
+        return payload
+
+    def _apply_capture_failure_backoff(self) -> None:
+        self._capture_backoff_until = time.time() + max(self.interval_s, 30)
 
     def _prepare_capture_surface(self) -> bool:
         if sys.platform != "darwin":

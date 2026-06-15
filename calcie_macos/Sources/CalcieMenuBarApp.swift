@@ -365,6 +365,66 @@ struct MenuBarContentView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
+            Divider()
+            updatesPreview
+            Divider()
+            recentEventsPreview
+        }
+    }
+
+    private var updatesPreview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Updates")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(viewModel.updateAvailable ? "Available" : "Checked")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(viewModel.updateAvailable ? .orange : .secondary)
+            }
+            Text(viewModel.updateStatusMessage)
+                .font(.caption2)
+                .foregroundStyle(viewModel.updateAvailable ? .orange : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(3)
+            HStack {
+                Button(viewModel.updateCheckInFlight ? "Checking..." : "Check Updates") {
+                    Task { await viewModel.refreshUpdateStatus() }
+                }
+                .disabled(viewModel.updateCheckInFlight)
+                Button("Download") {
+                    viewModel.openUpdateDownload()
+                }
+                .disabled(!viewModel.updateAvailable || viewModel.updateDownloadURL.isEmpty)
+                Button("Release Notes") {
+                    viewModel.openUpdateReleaseNotes()
+                }
+                .disabled(viewModel.updateReleaseNotesURL.isEmpty)
+            }
+        }
+    }
+
+    private var recentEventsPreview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Recent Events")
+                .font(.caption.weight(.semibold))
+            if viewModel.recentEvents.isEmpty {
+                Text("No recent events yet.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(viewModel.recentEvents.prefix(3)) { event in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(event.summary)
+                            .font(.caption2)
+                            .lineLimit(2)
+                        Text("\(event.timestamp) · \(event.type)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
         }
     }
 
